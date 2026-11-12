@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media print {
+  @page {
+    size: A4 landscape;
+    /* Lề trang theo Phụ lục I - Nghị định 30/2020/NĐ-CP: Trên 20mm, Phải 15mm, Dưới 20mm, Trái 30mm */
+    margin: 20mm 15mm 20mm 30mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-area {
+    font-family: "Times New Roman", Times, serif !important;
+    color: #000000 !important;
+    width: 100% !important;
+  }
+
+  .print-area table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+  }
+
+  .print-area th,
+  .print-area td {
+    border: 1px solid #000000 !important;
+    padding: 2px 4px !important;
+  }
+
+  .sign-block {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}
