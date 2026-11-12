@@ -87,9 +87,12 @@ export interface AttendanceRecord {
   truThuongCaNhan: number;
 }
 
+export type PeriodStatus = 'DRAFT' | 'LOCKED';
+
 export interface PayrollPeriod {
   periodKey: string; // YYYY-MM
   label: string; // "Tháng 10 năm 2026"
+  status?: PeriodStatus; // DRAFT (đang mở) | LOCKED (đã khóa sổ)
   inputMode: InputMode;
   directQuyKhoan: number;
   directThuongGop: number;

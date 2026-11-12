@@ -73,6 +73,7 @@ export function buildPeriodFromPrevious(
   return {
     periodKey: newKey,
     label: periodLabel(newKey),
+    status: 'DRAFT',
     inputMode: src?.inputMode ?? 'clusters',
     directQuyKhoan: 0,
     directThuongGop: 0,
@@ -129,6 +130,7 @@ export function normalizeAppState(raw: unknown): AppState {
       ...p,
       periodKey: key,
       label: p.label || periodLabel(key),
+      status: p.status === 'LOCKED' ? 'LOCKED' : 'DRAFT',
       clusters: Array.isArray(p.clusters) ? p.clusters : [],
       deductions: Array.isArray(p.deductions) ? p.deductions : [],
       standardDaysForHS1: p.standardDaysForHS1 === 26 ? 26 : 27,

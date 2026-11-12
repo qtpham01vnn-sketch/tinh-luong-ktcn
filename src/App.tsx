@@ -1,15 +1,21 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart3,
   Building2,
   Calculator,
   CalendarPlus,
+  CheckCircle2,
+  Cloud,
+  CloudOff,
+  CloudUpload,
   FileSpreadsheet,
   FolderInput,
   KeyRound,
   Lock,
+  LockOpen,
   LogOut,
   Printer,
+  RefreshCw,
   ShieldCheck,
   Trash2,
   Users,
@@ -43,6 +49,17 @@ import {
   sha256Hex,
   TEAM_LABELS,
 } from './utils/rbacAuth';
+import {
+  deleteDecisionFromCloud,
+  deletePeriodFromCloud,
+  fetchCloudAppState,
+  isSupabaseConfigured,
+  pushFullStateToCloud,
+  syncDecisionsToCloud,
+  syncEmployeesAndPinsToCloud,
+  syncPeriodToCloud,
+  syncSinglePinToCloud,
+} from './lib/supabase';
 import { exportPayrollToExcel } from './utils/excelExport';
 import { Tab1MonthlyHub } from './components/Tab1MonthlyHub';
 import { Tab2HR } from './components/Tab2HR';
@@ -55,6 +72,7 @@ import { ChangePinModal, SecurityAdminModal } from './components/SecurityModal';
 import { EmployeeSelfView } from './components/EmployeeSelfView';
 
 type TabKey = 'tab1' | 'tab2' | 'tab3' | 'tab4' | 'tab5';
+type CloudSyncStatus = 'offline' | 'connecting' | 'synced' | 'syncing' | 'empty_cloud' | 'error';
 
 const SESSION_STORAGE_KEY = 'ktcn_payroll_session_msnv_v1';
 
@@ -74,10 +92,78 @@ export function App() {
   const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [showChangePinModal, setShowChangePinModal] = useState(false);
 
+  // Trạng thái đồng bộ Supabase Cloud
+  const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus>(
+    isSupabaseConfigured ? 'connecting' : 'offline',
+  );
+  const [cloudMessage, setCloudMessage] = useState<string | null>(null);
+  const periodSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Luôn lưu dự phòng xuống localStorage (Zero-Downtime Fallback)
   useEffect(() => {
     const err = saveState(state);
     setStorageWarning(err);
   }, [state]);
+
+  // Tự động tải dữ liệu mới nhất từ Supabase Cloud khi mở App
+  const loadFromCloud = async () => {
+    if (!isSupabaseConfigured) {
+      setCloudStatus('offline');
+      return;
+    }
+    setCloudStatus('connecting');
+    const res = await fetchCloudAppState(state);
+    if (!res.ok) {
+      setCloudStatus('error');
+      setCloudMessage(`Chế độ Offline (Lỗi Cloud: ${res.error})`);
+      return;
+    }
+    if (res.isEmpty) {
+      setCloudStatus('empty_cloud');
+      setCloudMessage('Supabase Cloud đã kết nối nhưng chưa có dữ liệu. Hãy bấm "Đẩy dữ liệu mẫu T10/2026 lên Cloud".');
+      return;
+    }
+    if (res.state) {
+      setState(res.state);
+      setCloudStatus('synced');
+      setCloudMessage(null);
+    }
+  };
+
+  useEffect(() => {
+    void loadFromCloud();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Hàm đẩy toàn bộ dữ liệu mẫu / hiện tại lên Supabase Cloud bằng 1 cú click
+  const handlePushSampleToCloud = async () => {
+    if (!isSupabaseConfigured) return;
+    setCloudStatus('syncing');
+    setCloudMessage('Đang đẩy toàn bộ dữ liệu 23 nhân sự, PIN & bảng lương lên Supabase Cloud...');
+    const res = await pushFullStateToCloud(state);
+    if (res.ok) {
+      setCloudStatus('synced');
+      setCloudMessage('Đã đồng bộ 100% dữ liệu lên Supabase Cloud thành công!');
+      setTimeout(() => setCloudMessage(null), 4000);
+    } else {
+      setCloudStatus('error');
+      setCloudMessage(`Không thể đẩy lên Cloud: ${res.error}`);
+    }
+  };
+
+  // Helper tự động đồng bộ Kỳ lương lên Supabase (debounce 600ms để gõ phím mượt)
+  const scheduleSyncPeriodToCloud = (periodToSync: PayrollPeriod, signatures: SignatureConfig) => {
+    if (!isSupabaseConfigured) return;
+    if (periodSyncTimerRef.current) {
+      clearTimeout(periodSyncTimerRef.current);
+    }
+    setCloudStatus('syncing');
+    periodSyncTimerRef.current = setTimeout(async () => {
+      const res = await syncPeriodToCloud(periodToSync, signatures);
+      setCloudStatus(res.ok ? 'synced' : 'error');
+      if (!res.ok) setCloudMessage(`Lỗi lưu Cloud: ${res.error}`);
+    }, 600);
+  };
 
   const authAccounts = useMemo(
     () => buildDefaultAuthAccounts(state.employees, state.authAccounts),
@@ -105,6 +191,9 @@ export function App() {
   const periodKeys = useMemo(() => Object.keys(state.periods).sort(), [state.periods]);
   const activePeriod: PayrollPeriod =
     state.periods[state.activePeriodKey] ?? state.periods[periodKeys[periodKeys.length - 1]];
+
+  const isPeriodLocked = activePeriod.status === 'LOCKED';
+  const canEditActivePeriod = Boolean(perms?.canEdit && !isPeriodLocked);
 
   const allCalcs = useMemo(() => {
     return periodKeys.map((k) => ({
@@ -143,13 +232,41 @@ export function App() {
     }
   };
 
-  // Bảo vệ nghiêm ngặt: Chỉ Admin (canEdit === true) mới được phép thay đổi dữ liệu lương
+  // Bảo vệ nghiêm ngặt: Chỉ Admin (canEdit === true) và Kỳ lương chưa khóa sổ (DRAFT) mới được sửa
   const handleUpdatePeriod = (updater: (prev: PayrollPeriod) => PayrollPeriod) => {
     if (!perms?.canEdit) return;
     setState((prev) => {
       const cur = prev.periods[prev.activePeriodKey];
-      if (!cur) return prev;
+      if (!cur || cur.status === 'LOCKED') return prev;
       const updated = updater(cur);
+      scheduleSyncPeriodToCloud(updated, prev.signatures);
+      return {
+        ...prev,
+        periods: {
+          ...prev.periods,
+          [prev.activePeriodKey]: updated,
+        },
+      };
+    });
+  };
+
+  // Khóa sổ / Mở khóa kỳ lương (LOCKED / DRAFT) dành cho Admin
+  const handleTogglePeriodLock = () => {
+    if (!perms?.canEdit) return;
+    const nextStatus = isPeriodLocked ? 'DRAFT' : 'LOCKED';
+    if (
+      nextStatus === 'LOCKED' &&
+      !window.confirm(
+        `Xác nhận KHÓA SỔ kỳ lương "${activePeriod.label}"?\n\nSau khi khóa sổ, toàn bộ số liệu và hệ số snapshot của tháng này sẽ được đóng băng chống sửa nhầm (bảo toàn lịch sử vĩnh viễn).`,
+      )
+    ) {
+      return;
+    }
+    setState((prev) => {
+      const cur = prev.periods[prev.activePeriodKey];
+      if (!cur) return prev;
+      const updated: PayrollPeriod = { ...cur, status: nextStatus };
+      scheduleSyncPeriodToCloud(updated, prev.signatures);
       return {
         ...prev,
         periods: {
@@ -178,6 +295,7 @@ export function App() {
     }
     setState((prev) => {
       const created = buildPeriodFromPrevious(prev, newPeriodInput, prev.activePeriodKey);
+      scheduleSyncPeriodToCloud(created, prev.signatures);
       return {
         ...prev,
         periods: {
@@ -192,10 +310,15 @@ export function App() {
 
   const handleDeleteCurrentPeriod = () => {
     if (!perms?.canEdit) return;
+    if (isPeriodLocked) {
+      window.alert('Kỳ lương đang ở trạng thái ĐÃ KHÓA SỔ. Vui lòng mở khóa sổ trước khi xóa.');
+      return;
+    }
     if (periodKeys.length <= 1) return;
     if (!window.confirm(`Xóa kỳ lương ${activePeriod.label}? Dữ liệu kỳ này sẽ mất vĩnh viễn.`)) {
       return;
     }
+    const deletedKey = activePeriod.periodKey;
     setState((prev) => {
       const nextPeriods = { ...prev.periods };
       delete nextPeriods[prev.activePeriodKey];
@@ -206,15 +329,24 @@ export function App() {
         activePeriodKey: remainingKeys[remainingKeys.length - 1],
       };
     });
+    if (isSupabaseConfigured) {
+      void deletePeriodFromCloud(deletedKey);
+    }
   };
 
   // Tab 1 Policy handlers
   const handleAddPolicy = (policy: PolicyDecision) => {
     if (!perms?.canEdit) return;
-    setState((prev) => ({
-      ...prev,
-      policies: [policy, ...prev.policies],
-    }));
+    setState((prev) => {
+      const nextPolicies = [policy, ...prev.policies];
+      if (isSupabaseConfigured) {
+        void syncDecisionsToCloud(nextPolicies);
+      }
+      return {
+        ...prev,
+        policies: nextPolicies,
+      };
+    });
   };
 
   const handleDeletePolicy = (id: string) => {
@@ -223,9 +355,12 @@ export function App() {
       ...prev,
       policies: prev.policies.filter((p) => p.id !== id),
     }));
+    if (isSupabaseConfigured) {
+      void deleteDecisionFromCloud(id);
+    }
   };
 
-  // Tab 2 HR handlers (preserve historical periods, only update current active period)
+  // Tab 2 HR handlers (preserve historical & LOCKED periods, only update current DRAFT period)
   const handleUpsertEmployee = (emp: EmployeeMaster, isNew: boolean): string | null => {
     if (!perms?.canEdit) return 'Chỉ Admin mới có quyền chỉnh sửa nhân sự.';
     if (isNew && state.employees.some((e) => normalizeMsnv4(e.msnv) === normalizeMsnv4(emp.msnv))) {
@@ -237,11 +372,14 @@ export function App() {
         : prev.employees.map((e) => (e.msnv === emp.msnv ? emp : e));
 
       const curPeriod = prev.periods[prev.activePeriodKey];
+      const isCurLocked = curPeriod.status === 'LOCKED';
       const existingRec = curPeriod.records[emp.msnv];
-      const nextRecords = {
-        ...curPeriod.records,
-        [emp.msnv]: snapshotFromEmployee(emp, existingRec),
-      };
+      const nextRecords = isCurLocked
+        ? curPeriod.records
+        : {
+            ...curPeriod.records,
+            [emp.msnv]: snapshotFromEmployee(emp, existingRec),
+          };
 
       const nextAuth = buildDefaultAuthAccounts(nextEmployees, prev.authAccounts);
       if (nextAuth[emp.msnv] && emp.team && emp.role) {
@@ -250,6 +388,21 @@ export function App() {
           team: emp.team,
           role: emp.role,
         };
+      }
+
+      const updatedPeriod: PayrollPeriod = {
+        ...curPeriod,
+        records: nextRecords,
+      };
+
+      if (isSupabaseConfigured) {
+        setCloudStatus('syncing');
+        void syncEmployeesAndPinsToCloud(nextEmployees, nextAuth).then((r) => {
+          setCloudStatus(r.ok ? 'synced' : 'error');
+        });
+        if (!isCurLocked) {
+          scheduleSyncPeriodToCloud(updatedPeriod, prev.signatures);
+        }
       }
 
       const logEntry: HrChangeLogEntry = {
@@ -268,10 +421,7 @@ export function App() {
         authAccounts: nextAuth,
         periods: {
           ...prev.periods,
-          [prev.activePeriodKey]: {
-            ...curPeriod,
-            records: nextRecords,
-          },
+          [prev.activePeriodKey]: updatedPeriod,
         },
         hrChangeLog: [...prev.hrChangeLog, logEntry],
       };
@@ -287,13 +437,29 @@ export function App() {
       const nextActive = !target.active;
       const nextEmp: EmployeeMaster = { ...target, active: nextActive };
       const nextEmployees = prev.employees.map((e) => (e.msnv === msnv ? nextEmp : e));
+      const nextAuth = buildDefaultAuthAccounts(nextEmployees, prev.authAccounts);
 
       const curPeriod = prev.periods[prev.activePeriodKey];
+      const isCurLocked = curPeriod.status === 'LOCKED';
       const nextRecords = { ...curPeriod.records };
-      if (!nextActive) {
-        delete nextRecords[msnv];
-      } else {
-        nextRecords[msnv] = snapshotFromEmployee(nextEmp);
+      if (!isCurLocked) {
+        if (!nextActive) {
+          delete nextRecords[msnv];
+        } else {
+          nextRecords[msnv] = snapshotFromEmployee(nextEmp);
+        }
+      }
+
+      const updatedPeriod: PayrollPeriod = {
+        ...curPeriod,
+        records: nextRecords,
+      };
+
+      if (isSupabaseConfigured) {
+        void syncEmployeesAndPinsToCloud(nextEmployees, nextAuth);
+        if (!isCurLocked) {
+          scheduleSyncPeriodToCloud(updatedPeriod, prev.signatures);
+        }
       }
 
       const logEntry: HrChangeLogEntry = {
@@ -311,12 +477,10 @@ export function App() {
       return {
         ...prev,
         employees: nextEmployees,
+        authAccounts: nextAuth,
         periods: {
           ...prev.periods,
-          [prev.activePeriodKey]: {
-            ...curPeriod,
-            records: nextRecords,
-          },
+          [prev.activePeriodKey]: updatedPeriod,
         },
         hrChangeLog: [...prev.hrChangeLog, logEntry],
       };
@@ -332,6 +496,7 @@ export function App() {
     setState((prev) => {
       const map = new Map(prev.employees.map((e) => [e.msnv, e]));
       const curPeriod = prev.periods[prev.activePeriodKey];
+      const isCurLocked = curPeriod.status === 'LOCKED';
       const nextRecords = { ...curPeriod.records };
 
       for (const imp of imported) {
@@ -340,16 +505,31 @@ export function App() {
           updated++;
           const merged = { ...old, ...imp, sortOrder: old.sortOrder };
           map.set(imp.msnv, merged);
-          nextRecords[imp.msnv] = snapshotFromEmployee(merged, nextRecords[imp.msnv]);
+          if (!isCurLocked) {
+            nextRecords[imp.msnv] = snapshotFromEmployee(merged, nextRecords[imp.msnv]);
+          }
         } else {
           added++;
           map.set(imp.msnv, imp);
-          nextRecords[imp.msnv] = snapshotFromEmployee(imp);
+          if (!isCurLocked) {
+            nextRecords[imp.msnv] = snapshotFromEmployee(imp);
+          }
         }
       }
 
       const nextEmployees = Array.from(map.values());
       const nextAuth = buildDefaultAuthAccounts(nextEmployees, prev.authAccounts);
+      const updatedPeriod: PayrollPeriod = {
+        ...curPeriod,
+        records: nextRecords,
+      };
+
+      if (isSupabaseConfigured) {
+        void syncEmployeesAndPinsToCloud(nextEmployees, nextAuth);
+        if (!isCurLocked) {
+          scheduleSyncPeriodToCloud(updatedPeriod, prev.signatures);
+        }
+      }
 
       const logEntry: HrChangeLogEntry = {
         id: `log_${Date.now()}`,
@@ -367,10 +547,7 @@ export function App() {
         authAccounts: nextAuth,
         periods: {
           ...prev.periods,
-          [prev.activePeriodKey]: {
-            ...curPeriod,
-            records: nextRecords,
-          },
+          [prev.activePeriodKey]: updatedPeriod,
         },
         hrChangeLog: [...prev.hrChangeLog, logEntry],
       };
@@ -380,21 +557,32 @@ export function App() {
 
   const handleUpdateSignatures = (signatures: SignatureConfig) => {
     if (!perms?.canEdit) return;
-    setState((prev) => ({ ...prev, signatures }));
+    setState((prev) => {
+      const cur = prev.periods[prev.activePeriodKey];
+      if (cur) scheduleSyncPeriodToCloud(cur, signatures);
+      return { ...prev, signatures };
+    });
   };
 
-  // Security & PIN Handlers
+  // Security & PIN Handlers (đồng bộ trực tiếp lên bảng ktcn_security_pins trên Supabase)
   const handleUpdateAccount = (msnv: string, updater: (prevAcc: AuthAccount) => AuthAccount) => {
     if (!perms?.canManageSecurity) return;
     setState((prev) => {
       const currentAuth = buildDefaultAuthAccounts(prev.employees, prev.authAccounts);
       const target = currentAuth[msnv];
       if (!target) return prev;
+      const updatedAcc = updater(target);
+      if (isSupabaseConfigured) {
+        setCloudStatus('syncing');
+        void syncSinglePinToCloud(updatedAcc).then((r) => {
+          setCloudStatus(r.ok ? 'synced' : 'error');
+        });
+      }
       return {
         ...prev,
         authAccounts: {
           ...currentAuth,
-          [msnv]: updater(target),
+          [msnv]: updatedAcc,
         },
       };
     });
@@ -420,16 +608,24 @@ export function App() {
       if (nextRecords[msnv]) {
         nextRecords[msnv] = { ...nextRecords[msnv], team };
       }
+      const updatedPeriod: PayrollPeriod = {
+        ...curPeriod,
+        records: nextRecords,
+      };
+      if (isSupabaseConfigured) {
+        setCloudStatus('syncing');
+        void syncEmployeesAndPinsToCloud(nextEmployees, currentAuth).then((r) => {
+          setCloudStatus(r.ok ? 'synced' : 'error');
+        });
+        scheduleSyncPeriodToCloud(updatedPeriod, prev.signatures);
+      }
       return {
         ...prev,
         employees: nextEmployees,
         authAccounts: currentAuth,
         periods: {
           ...prev.periods,
-          [prev.activePeriodKey]: {
-            ...curPeriod,
-            records: nextRecords,
-          },
+          [prev.activePeriodKey]: updatedPeriod,
         },
       };
     });
@@ -447,6 +643,12 @@ export function App() {
           accessGranted: grant ? true : isLeadership,
           updatedAt: new Date().toISOString().slice(0, 10),
         };
+      }
+      if (isSupabaseConfigured) {
+        setCloudStatus('syncing');
+        void syncEmployeesAndPinsToCloud(prev.employees, nextAuth).then((r) => {
+          setCloudStatus(r.ok ? 'synced' : 'error');
+        });
       }
       return { ...prev, authAccounts: nextAuth };
     });
@@ -466,26 +668,40 @@ export function App() {
           updatedAt: new Date().toISOString().slice(0, 10),
         };
       }
+      if (isSupabaseConfigured) {
+        setCloudStatus('syncing');
+        void syncEmployeesAndPinsToCloud(prev.employees, nextAuth).then((r) => {
+          setCloudStatus(r.ok ? 'synced' : 'error');
+        });
+      }
       return { ...prev, authAccounts: nextAuth };
     });
   };
 
+  // Nhân viên hoặc bất kỳ user nào tự đổi mã PIN cá nhân -> lưu thẳng lên bảng ktcn_security_pins trên Supabase
   const handleChangeOwnPin = (newPin: string) => {
     if (!currentAccount) return;
     setState((prev) => {
       const currentAuth = buildDefaultAuthAccounts(prev.employees, prev.authAccounts);
       const acc = currentAuth[currentAccount.msnv];
       if (!acc) return prev;
+      const updatedAcc: AuthAccount = {
+        ...acc,
+        pinHash: sha256Hex(newPin),
+        pinDisplayForAdmin: newPin,
+        updatedAt: new Date().toISOString().slice(0, 10),
+      };
+      if (isSupabaseConfigured) {
+        setCloudStatus('syncing');
+        void syncSinglePinToCloud(updatedAcc).then((r) => {
+          setCloudStatus(r.ok ? 'synced' : 'error');
+        });
+      }
       return {
         ...prev,
         authAccounts: {
           ...currentAuth,
-          [currentAccount.msnv]: {
-            ...acc,
-            pinHash: sha256Hex(newPin),
-            pinDisplayForAdmin: newPin,
-            updatedAt: new Date().toISOString().slice(0, 10),
-          },
+          [currentAccount.msnv]: updatedAcc,
         },
       };
     });
@@ -579,6 +795,31 @@ export function App() {
                   )}
                   {perms.badgeText}
                 </span>
+
+                {/* Huy hiệu Trạng thái Cloud (Supabase) vs Offline/Local */}
+                {cloudStatus === 'synced' || cloudStatus === 'syncing' ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-[10px] font-bold text-emerald-300 ring-1 ring-emerald-400/40">
+                    {cloudStatus === 'syncing' ? (
+                      <RefreshCw className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Cloud className="h-3 w-3" />
+                    )}
+                    {cloudStatus === 'syncing'
+                      ? 'Đang đồng bộ Cloud...'
+                      : 'Đã đồng bộ Cloud (Supabase)'}
+                  </span>
+                ) : cloudStatus === 'empty_cloud' ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/20 px-2.5 py-0.5 text-[10px] font-bold text-blue-200 ring-1 ring-blue-400/40">
+                    <CloudUpload className="h-3 w-3" /> Cloud sẵn sàng (Chưa khởi tạo)
+                  </span>
+                ) : (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full bg-slate-700 px-2.5 py-0.5 text-[10px] font-semibold text-slate-300"
+                    title="Dữ liệu đang lưu trên trình duyệt (localStorage). Cấu hình VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY để đồng bộ Cloud."
+                  >
+                    <CloudOff className="h-3 w-3 text-slate-400" /> Chế độ Offline / Local
+                  </span>
+                )}
               </div>
               <h1 className="text-base font-bold tracking-tight sm:text-lg">
                 Hệ thống Quản lý & Tính lương Phòng Kỹ thuật - Công nghệ
@@ -587,6 +828,25 @@ export function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* Nút Đẩy dữ liệu mẫu T10/2026 lên Cloud (hiện khi Cloud trống hoặc cho Admin đồng bộ nhanh) */}
+            {isSupabaseConfigured && perms.canEdit && (
+              <button
+                type="button"
+                onClick={handlePushSampleToCloud}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold shadow transition ${
+                  cloudStatus === 'empty_cloud'
+                    ? 'animate-pulse bg-emerald-500 text-slate-950 hover:bg-emerald-400'
+                    : 'border border-emerald-500/40 bg-emerald-950/60 text-emerald-200 hover:bg-emerald-900/70'
+                }`}
+                title="Đẩy toàn bộ dữ liệu nhân sự, mã PIN và các kỳ lương hiện tại lên Supabase Cloud"
+              >
+                <CloudUpload className="h-3.5 w-3.5" />
+                {cloudStatus === 'empty_cloud'
+                  ? 'Đẩy dữ liệu mẫu Tháng 10/2026 lên Cloud'
+                  : 'Đồng bộ lên Cloud'}
+              </button>
+            )}
+
             {/* Thông tin User đang đăng nhập */}
             <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/90 px-3 py-1.5 text-xs">
               <span className="font-mono font-bold text-amber-300">
@@ -596,9 +856,9 @@ export function App() {
               <span className="hidden text-slate-400 sm:inline">({currentEmployee.position})</span>
             </div>
 
-            {/* Chọn kỳ lương */}
+            {/* Bộ chọn Kỳ lương (Dropdown tất cả các tháng/năm) */}
             <div className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs">
-              <span className="text-slate-400">Kỳ:</span>
+              <span className="text-slate-400">Kỳ lương:</span>
               <select
                 value={activePeriod.periodKey}
                 onChange={(e) =>
@@ -606,13 +866,45 @@ export function App() {
                 }
                 className="rounded bg-slate-700 px-2 py-1 font-semibold text-white focus:outline-none"
               >
-                {periodKeys.map((k) => (
-                  <option key={k} value={k}>
-                    {state.periods[k].label} ({k})
-                  </option>
-                ))}
+                {periodKeys.map((k) => {
+                  const p = state.periods[k];
+                  const lockTag = p.status === 'LOCKED' ? ' 🔒 Đã khóa sổ' : '';
+                  return (
+                    <option key={k} value={k}>
+                      {p.label} ({k}){lockTag}
+                    </option>
+                  );
+                })}
               </select>
             </div>
+
+            {/* Khóa sổ / Mở khóa kỳ lương (LOCKED / DRAFT) cho Admin */}
+            {perms.canEdit && (
+              <button
+                type="button"
+                onClick={handleTogglePeriodLock}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                  isPeriodLocked
+                    ? 'bg-amber-600 text-white hover:bg-amber-500'
+                    : 'border border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700'
+                }`}
+                title={
+                  isPeriodLocked
+                    ? 'Kỳ lương này đang Khóa sổ (chống sửa nhầm). Bấm để Mở khóa.'
+                    : 'Khóa sổ tháng này sau khi đã chốt lương để đóng băng lịch sử.'
+                }
+              >
+                {isPeriodLocked ? (
+                  <>
+                    <Lock className="h-3.5 w-3.5" /> Đã khóa sổ (Mở khóa)
+                  </>
+                ) : (
+                  <>
+                    <LockOpen className="h-3.5 w-3.5 text-emerald-400" /> Khóa sổ tháng này
+                  </>
+                )}
+              </button>
+            )}
 
             {perms.canEdit && (
               <>
@@ -621,10 +913,10 @@ export function App() {
                   onClick={handleOpenNewPeriod}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-500"
                 >
-                  <CalendarPlus className="h-3.5 w-3.5" /> Tạo kỳ mới
+                  <CalendarPlus className="h-3.5 w-3.5" /> + Tạo kỳ lương mới
                 </button>
 
-                {periodKeys.length > 1 && (
+                {periodKeys.length > 1 && !isPeriodLocked && (
                   <button
                     type="button"
                     onClick={handleDeleteCurrentPeriod}
@@ -786,6 +1078,46 @@ export function App() {
           </div>
         )}
 
+        {cloudMessage && (
+          <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-xs font-medium text-blue-900">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-blue-600" />
+              <span>{cloudMessage}</span>
+            </div>
+            {cloudStatus === 'empty_cloud' && perms.canEdit && (
+              <button
+                type="button"
+                onClick={handlePushSampleToCloud}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1 text-xs font-bold text-white hover:bg-blue-700"
+              >
+                <CloudUpload className="h-3.5 w-3.5" /> Đẩy dữ liệu mẫu Tháng 10/2026 lên Cloud ngay
+              </button>
+            )}
+          </div>
+        )}
+
+        {isPeriodLocked && (
+          <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50/90 px-4 py-2.5 text-xs font-medium text-amber-950">
+            <div className="flex items-center gap-2">
+              <Lock className="h-4 w-4 shrink-0 text-amber-700" />
+              <span>
+                <strong>Kỳ lương {activePeriod.label} đã KHÓA SỔ (LOCKED):</strong> Toàn bộ số liệu
+                công, quỹ lương và bản chụp hệ số (`snapshot`) của tháng này đã được đóng băng để
+                bảo toàn lịch sử vĩnh viễn.
+              </span>
+            </div>
+            {perms.canEdit && (
+              <button
+                type="button"
+                onClick={handleTogglePeriodLock}
+                className="inline-flex items-center gap-1 rounded-lg border border-amber-400 bg-white px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+              >
+                <LockOpen className="h-3.5 w-3.5" /> Mở khóa sổ để chỉnh sửa
+              </button>
+            )}
+          </div>
+        )}
+
         {/* KPI Strip (Thông tin Quỹ chung minh bạch toàn phòng) */}
         <div className="no-print mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
@@ -862,7 +1194,7 @@ export function App() {
                   onUpdatePeriod={handleUpdatePeriod}
                   onAddPolicy={handleAddPolicy}
                   onDeletePolicy={handleDeletePolicy}
-                  readOnly={!perms.canEdit}
+                  readOnly={!canEditActivePeriod}
                 />
               )}
               {activeTab === 'tab2' && perms.canViewAllRoom && (
@@ -881,7 +1213,7 @@ export function App() {
                   period={activePeriod}
                   calc={visibleCalc}
                   onUpdatePeriod={handleUpdatePeriod}
-                  readOnly={!perms.canEdit}
+                  readOnly={!canEditActivePeriod}
                   scopeBadge={perms.scopeTitle}
                 />
               )}
@@ -895,10 +1227,21 @@ export function App() {
                   calc={visibleCalc}
                   onUpdateSignatures={handleUpdateSignatures}
                   onRestore={(restored) => {
-                    if (perms.canEdit) setState(restored);
+                    if (perms.canEdit) {
+                      setState(restored);
+                      if (isSupabaseConfigured) {
+                        void pushFullStateToCloud(restored);
+                      }
+                    }
                   }}
                   onResetSample={() => {
-                    if (perms.canEdit) setState(createInitialAppState());
+                    if (perms.canEdit) {
+                      const initial = createInitialAppState();
+                      setState(initial);
+                      if (isSupabaseConfigured) {
+                        void pushFullStateToCloud(initial);
+                      }
+                    }
                   }}
                   readOnly={!perms.canEdit}
                 />
