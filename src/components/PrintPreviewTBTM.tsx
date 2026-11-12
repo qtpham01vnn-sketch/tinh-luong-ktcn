@@ -22,53 +22,57 @@ export const PrintPreviewTBTM: React.FC<PrintPreviewTBTMProps> = ({
     : `${sig.place || 'Đồng Nai'}, ngày ${now.getDate()} tháng ${now.getMonth() + 1} năm ${now.getFullYear()}`;
 
   return (
-    <div className="mx-auto max-w-[1200px] bg-white p-8 text-black print:p-0 print:text-[10pt]">
+    <div
+      id="print-area"
+      className="print-area mx-auto bg-white text-black p-4 print:p-0 print:text-[9.5pt]"
+      style={{ fontFamily: '"Times New Roman", Times, serif' }}
+    >
       {/* 1. Header Công ty */}
-      <div className="mb-4">
-        <div className="text-xs font-bold uppercase tracking-wider text-slate-900">
+      <div className="mb-3">
+        <div className="text-xs font-bold uppercase tracking-wider text-black">
           CÔNG TY CỔ PHẦN GẠCH MEN PHƯƠNG NAM
         </div>
-        <div className="text-xs font-semibold text-slate-800">
+        <div className="text-xs font-semibold text-black">
           Phòng Kỹ thuật - Công nghệ
         </div>
       </div>
 
       {/* 2. Tiêu đề Bảng lương & 7 dòng tóm tắt chuẩn TBTM */}
-      <div className="mb-4">
-        <h2 className="text-base font-bold uppercase text-slate-900">
-          {period.label}
+      <div className="mb-3">
+        <h2 className="text-sm font-bold uppercase text-black text-center sm:text-base">
+          BẢNG THANH TOÁN TIỀN LƯƠNG {period.label.toUpperCase()}
         </h2>
-        <div className="mt-2 grid grid-cols-2 gap-x-8 gap-y-1 text-xs">
-          <div className="flex justify-between border-b border-dashed border-slate-300 py-0.5">
+        <div className="mt-2 grid grid-cols-2 gap-x-8 gap-y-0.5 text-[9pt]">
+          <div className="flex justify-between border-b border-dashed border-slate-400 py-0.5">
             <span>Tổng quỹ lương PKTCN theo sản lượng khoán:</span>
             <strong className="font-mono">{formatVND(s.quyLuongSP)} đ</strong>
           </div>
-          <div className="flex justify-between border-b border-dashed border-slate-300 py-0.5">
+          <div className="flex justify-between border-b border-dashed border-slate-400 py-0.5">
             <span>Tổng chi quỹ lương + thưởng ({period.periodKey.slice(5)}/{period.periodKey.slice(0, 4)}):</span>
-            <strong className="font-mono text-blue-900">{formatVND(s.tongChiQuy)} đ</strong>
+            <strong className="font-mono text-black">{formatVND(s.tongChiQuy)} đ</strong>
           </div>
 
-          <div className="flex justify-between border-b border-dashed border-slate-300 py-0.5">
+          <div className="flex justify-between border-b border-dashed border-slate-400 py-0.5">
             <span>Tổng thưởng :</span>
             <strong className="font-mono">{formatVND(s.tongThuong)} đ</strong>
           </div>
-          <div className="flex justify-between border-b border-dashed border-slate-300 py-0.5">
+          <div className="flex justify-between border-b border-dashed border-slate-400 py-0.5">
             <span>Quỹ dự phòng 50%:</span>
             <strong className="font-mono">{formatVND(s.quyDuPhong50)} đ</strong>
           </div>
 
-          <div className="flex justify-between border-b border-dashed border-slate-300 py-0.5">
+          <div className="flex justify-between border-b border-dashed border-slate-400 py-0.5">
             <span>Chi thưởng 50% :</span>
             <strong className="font-mono">{formatVND(s.thuongChia50)} đ</strong>
           </div>
-          <div className="flex justify-between border-b border-dashed border-slate-300 py-0.5">
+          <div className="flex justify-between border-b border-dashed border-slate-400 py-0.5">
             <span>Lương hệ số 1 TBTM (K THƯỞNG):</span>
-            <strong className="font-mono text-indigo-900">{formatVND(s.luongHS1KhongThuong)} đ</strong>
+            <strong className="font-mono text-black">{formatVND(s.luongHS1KhongThuong)} đ</strong>
           </div>
 
-          <div className="col-span-2 flex justify-between border-b border-slate-400 py-0.5 font-bold">
+          <div className="col-span-2 flex justify-between border-b border-black py-0.5 font-bold">
             <span>Lương hệ số 1 (CÓ THƯỞNG):</span>
-            <span className="font-mono text-indigo-950">{formatVND(s.luongHS1CoThuong)} đ</span>
+            <span className="font-mono text-black">{formatVND(s.luongHS1CoThuong)} đ</span>
           </div>
         </div>
       </div>
@@ -199,7 +203,7 @@ export const PrintPreviewTBTM: React.FC<PrintPreviewTBTMProps> = ({
       </table>
 
       {/* 4. Ngày tháng & 4 Chữ ký chuẩn TBTM */}
-      <div className="mt-6 break-inside-avoid text-xs">
+      <div className="sign-block mt-6 break-inside-avoid text-xs">
         <div className="mb-2 text-right italic">{dateStr}</div>
         <div className="grid grid-cols-4 gap-4 text-center">
           <div>

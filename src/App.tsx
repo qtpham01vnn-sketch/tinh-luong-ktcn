@@ -69,6 +69,8 @@ import { Tab4Analytics } from './components/Tab4Analytics';
 import { Tab5Export } from './components/Tab5Export';
 import { TabTbtmCompare } from './components/TabTbtmCompare';
 import { PrintPreview } from './components/PrintPreview';
+import { PrintPreviewTBTM } from './components/PrintPreviewTBTM';
+import { calculateTBTM, exportTbtmToExcel } from './utils/tbtmCalc';
 import { LoginScreen } from './components/LoginScreen';
 import { ChangePinModal, SecurityAdminModal } from './components/SecurityModal';
 import { EmployeeSelfView } from './components/EmployeeSelfView';
@@ -948,13 +950,23 @@ export function App() {
               </button>
             )}
 
-            <button
-              type="button"
-              onClick={() => exportPayrollToExcel(activePeriod, visibleCalc, state.signatures)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
-            >
-              <FileSpreadsheet className="h-3.5 w-3.5" /> Xuất Excel NĐ30
-            </button>
+            {activeTab === 'tab_tbtm' ? (
+              <button
+                type="button"
+                onClick={() => exportTbtmToExcel(activePeriod, calculateTBTM(activePeriod, fullCalc), state.signatures)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-500"
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5" /> Xuất Excel TBTM
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => exportPayrollToExcel(activePeriod, visibleCalc, state.signatures)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5" /> Xuất Excel NĐ30
+              </button>
+            )}
 
             <button
               type="button"
@@ -1264,9 +1276,17 @@ export function App() {
               )}
             </div>
 
-            {activeTab !== 'tab5' && activeTab !== 'tab_tbtm' && (
+            {activeTab !== 'tab5' && (
               <div className="hidden print:block">
-                <PrintPreview period={activePeriod} calc={visibleCalc} sig={state.signatures} />
+                {activeTab === 'tab_tbtm' ? (
+                  <PrintPreviewTBTM
+                    period={activePeriod}
+                    tbtmCalc={calculateTBTM(activePeriod, fullCalc)}
+                    sig={state.signatures}
+                  />
+                ) : (
+                  <PrintPreview period={activePeriod} calc={visibleCalc} sig={state.signatures} />
+                )}
               </div>
             )}
           </>
