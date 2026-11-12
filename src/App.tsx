@@ -16,6 +16,7 @@ import {
   LogOut,
   Printer,
   RefreshCw,
+  Scale,
   ShieldCheck,
   Trash2,
   Users,
@@ -66,12 +67,13 @@ import { Tab2HR } from './components/Tab2HR';
 import { Tab3Payroll } from './components/Tab3Payroll';
 import { Tab4Analytics } from './components/Tab4Analytics';
 import { Tab5Export } from './components/Tab5Export';
+import { TabTbtmCompare } from './components/TabTbtmCompare';
 import { PrintPreview } from './components/PrintPreview';
 import { LoginScreen } from './components/LoginScreen';
 import { ChangePinModal, SecurityAdminModal } from './components/SecurityModal';
 import { EmployeeSelfView } from './components/EmployeeSelfView';
 
-type TabKey = 'tab1' | 'tab2' | 'tab3' | 'tab4' | 'tab5';
+type TabKey = 'tab1' | 'tab2' | 'tab3' | 'tab4' | 'tab5' | 'tab_tbtm';
 type CloudSyncStatus = 'offline' | 'connecting' | 'synced' | 'syncing' | 'empty_cloud' | 'error';
 
 const SESSION_STORAGE_KEY = 'ktcn_payroll_session_msnv_v1';
@@ -749,6 +751,13 @@ export function App() {
       visible: !perms.isSelfOnly,
     },
     {
+      key: 'tab_tbtm',
+      label: 'Tab Đối chiếu Chuẩn TBTM (26 công)',
+      shortLabel: 'Đối chiếu Chuẩn TBTM (26 công)',
+      icon: <Scale className="h-4 w-4 text-amber-300" />,
+      visible: perms.canViewAllRoom, // Chỉ Admin (1439) và Trưởng phòng (0266)
+    },
+    {
       key: 'tab4',
       label: 'Tab 4: Phân tích & Biến động tháng',
       shortLabel: '4. Báo cáo Phân tích',
@@ -1215,6 +1224,13 @@ export function App() {
                   onUpdatePeriod={handleUpdatePeriod}
                   readOnly={!canEditActivePeriod}
                   scopeBadge={perms.scopeTitle}
+                />
+              )}
+              {activeTab === 'tab_tbtm' && perms.canViewAllRoom && (
+                <TabTbtmCompare
+                  period={activePeriod}
+                  fullCalc={fullCalc}
+                  signatures={state.signatures}
                 />
               )}
               {activeTab === 'tab4' && perms.canViewAllRoom && (
