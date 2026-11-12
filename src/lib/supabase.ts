@@ -24,8 +24,14 @@ import {
 } from '../utils/rbacAuth';
 
 const envMeta = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
-const rawUrl = (envMeta.VITE_SUPABASE_URL ?? '').trim();
-const rawAnonKey = (envMeta.VITE_SUPABASE_ANON_KEY ?? '').trim();
+const rawUrl = (
+  envMeta.VITE_SUPABASE_URL ||
+  'https://lskrcerzxltlrcewigrw.supabase.co'
+).trim();
+const rawAnonKey = (
+  envMeta.VITE_SUPABASE_ANON_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxza3JjZXJ6eGx0bHJjZXdpZ3J3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU5MjMwMzAsImV4cCI6MjA5MTQ5OTAzMH0.60K5fWetNDQkMl8G32Sy6E9-EkhpDHfzIhfmfOLcZOI'
+).trim();
 
 export const isSupabaseConfigured: boolean =
   rawUrl.startsWith('http') &&
