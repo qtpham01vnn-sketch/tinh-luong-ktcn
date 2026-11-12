@@ -1264,7 +1264,7 @@ export function App() {
               )}
             </div>
 
-            {activeTab !== 'tab5' && (
+            {activeTab !== 'tab5' && activeTab !== 'tab_tbtm' && (
               <div className="hidden print:block">
                 <PrintPreview period={activePeriod} calc={visibleCalc} sig={state.signatures} />
               </div>
