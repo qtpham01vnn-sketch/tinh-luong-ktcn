@@ -5,17 +5,36 @@ export type CalculationMode = 'A' | 'B';
 
 export type InputMode = 'clusters' | 'direct';
 
+/** 4 cấp phân quyền theo cơ cấu Phòng KTCN */
+export type UserRole = 'admin' | 'truong_phong' | 'to_quan_ly' | 'nhan_vien';
+
+/** Phân tổ chuyên môn trong Phòng KTCN */
+export type TeamGroup = 'ban_lanh_dao' | 'to_co_ly' | 'to_qc_kcs' | 'thong_ke';
+
 export interface EmployeeMaster {
   id: string;
   msnv: string;
   fullName: string;
   position: string;
   department: Department;
+  team?: TeamGroup;
+  role?: UserRole;
   baseSalary2020: number;
   hsCV: number;
   hsTN: number;
   active: boolean;
   sortOrder: number;
+}
+
+export interface AuthAccount {
+  msnv: string;
+  normalizedMsnv: string; // Chuẩn hóa 4 chữ số: VD "579" -> "0579"
+  pinHash: string; // SHA-256 hex digest của mã PIN 4 số
+  pinDisplayForAdmin: string; // Hiển thị cho Admin trong vùng cấp phát PIN
+  accessGranted: boolean; // Mặc định true cho 1439 & 0266, false cho 21 người còn lại
+  role: UserRole;
+  team: TeamGroup;
+  updatedAt: string;
 }
 
 export interface ProductionCluster {
@@ -58,6 +77,7 @@ export interface AttendanceRecord {
   fullName: string;
   position: string;
   department: Department;
+  team?: TeamGroup;
   baseSalary2020: number;
   hsCV: number;
   hsTN: number;
@@ -110,4 +130,5 @@ export interface AppState {
   policies: PolicyDecision[];
   hrChangeLog: HrChangeLogEntry[];
   signatures: SignatureConfig;
+  authAccounts?: Record<string, AuthAccount>; // key = msnv
 }

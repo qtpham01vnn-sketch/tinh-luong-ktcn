@@ -15,6 +15,8 @@ interface Tab3Props {
   period: PayrollPeriod;
   calc: PayrollCalculationResult;
   onUpdatePeriod: (updater: (prev: PayrollPeriod) => PayrollPeriod) => void;
+  readOnly?: boolean;
+  scopeBadge?: string;
 }
 
 /** Ô số sửa trực tiếp: commit khi blur/Enter, hỗ trợ dán cột nhiều dòng từ Excel */
@@ -62,7 +64,13 @@ const NumberCell: React.FC<{
   );
 };
 
-export const Tab3Payroll: React.FC<Tab3Props> = ({ period, calc, onUpdatePeriod }) => {
+export const Tab3Payroll: React.FC<Tab3Props> = ({
+  period,
+  calc,
+  onUpdatePeriod,
+  readOnly = false,
+  scopeBadge,
+}) => {
   const { summary: s, vanPhongRows, dayChuyenRows, subVanPhong, subDayChuyen, grandTotal } = calc;
   const isA = period.calculationMode === 'A';
   const orderedMsnv = calc.rows.map((r) => r.msnv);
@@ -143,21 +151,29 @@ export const Tab3Payroll: React.FC<Tab3Props> = ({ period, calc, onUpdatePeriod 
       <td className="px-2 py-1 text-right tabular-nums">{formatDecimal(r.hsTN)}</td>
       <td className="px-2 py-1 text-right font-semibold tabular-nums">{formatDecimal(r.hsTong)}</td>
       <td className="px-1 py-1 text-right">
-        <NumberCell
-          value={r.congKhoan}
-          highlight={r.isAnomalyCong}
-          onCommit={(v) => updateRecord(r.msnv, 'congKhoan', v)}
-          onPasteColumn={(vals) => pasteColumn(r.msnv, 'congKhoan', vals)}
-        />
+        {readOnly ? (
+          <span className="px-1.5 font-semibold tabular-nums">{formatDecimal(r.congKhoan, 4)}</span>
+        ) : (
+          <NumberCell
+            value={r.congKhoan}
+            highlight={r.isAnomalyCong}
+            onCommit={(v) => updateRecord(r.msnv, 'congKhoan', v)}
+            onPasteColumn={(vals) => pasteColumn(r.msnv, 'congKhoan', vals)}
+          />
+        )}
       </td>
       <td className="px-2 py-1 text-right tabular-nums">{formatDecimal(r.hsNgayCong, 4)}</td>
       <td className="px-1 py-1 text-right">
-        <NumberCell
-          value={r.congBD}
-          width="w-16"
-          onCommit={(v) => updateRecord(r.msnv, 'congBD', v)}
-          onPasteColumn={(vals) => pasteColumn(r.msnv, 'congBD', vals)}
-        />
+        {readOnly ? (
+          <span className="px-1.5 tabular-nums">{formatDecimal(r.congBD, 2)}</span>
+        ) : (
+          <NumberCell
+            value={r.congBD}
+            width="w-16"
+            onCommit={(v) => updateRecord(r.msnv, 'congBD', v)}
+            onPasteColumn={(vals) => pasteColumn(r.msnv, 'congBD', vals)}
+          />
+        )}
       </td>
       <td className="px-2 py-1 text-right tabular-nums">{formatDecimal(r.hsNgayCongBD, 3)}</td>
       <td className="px-2 py-1 text-right tabular-nums">{formatVND(r.luongKhoanHienThi)}</td>
@@ -168,14 +184,22 @@ export const Tab3Payroll: React.FC<Tab3Props> = ({ period, calc, onUpdatePeriod 
         {formatVND(r.tienThuongHienThi)}
       </td>
       <td className="px-1 py-1 text-right">
-        <NumberCell
-          value={r.truThuongCaNhan}
-          width="w-24"
-          onCommit={(v) => updateRecord(r.msnv, 'truThuongCaNhan', v)}
-          onPasteColumn={(vals) => pasteColumn(r.msnv, 'truThuongCaNhan', vals)}
-        />
-        {r.truThuongTuNhatKy > 0 && (
-          <div className="text-[10px] text-rose-600">+{formatVND(r.truThuongTuNhatKy)} nhật ký</div>
+        {readOnly ? (
+          <span className="px-1.5 tabular-nums">{formatVND(r.tongTruThuong)}</span>
+        ) : (
+          <>
+            <NumberCell
+              value={r.truThuongCaNhan}
+              width="w-24"
+              onCommit={(v) => updateRecord(r.msnv, 'truThuongCaNhan', v)}
+              onPasteColumn={(vals) => pasteColumn(r.msnv, 'truThuongCaNhan', vals)}
+            />
+            {r.truThuongTuNhatKy > 0 && (
+              <div className="text-[10px] text-rose-600">
+                +{formatVND(r.truThuongTuNhatKy)} nhật ký
+              </div>
+            )}
+          </>
         )}
       </td>
       <td className="px-2 py-1 text-right font-bold text-slate-900 tabular-nums">
@@ -239,15 +263,17 @@ export const Tab3Payroll: React.FC<Tab3Props> = ({ period, calc, onUpdatePeriod 
             <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
               <button
                 type="button"
+                disabled={readOnly}
                 className={toggleBtn(isA)}
-                onClick={() => onUpdatePeriod((p) => ({ ...p, calculationMode: 'A' }))}
+                onClick={() => !readOnly && onUpdatePeriod((p) => ({ ...p, calculationMode: 'A' }))}
               >
                 Chế độ 1 — Gộp quỹ (mẫu KTCN)
               </button>
               <button
                 type="button"
+                disabled={readOnly}
                 className={toggleBtn(!isA)}
-                onClick={() => onUpdatePeriod((p) => ({ ...p, calculationMode: 'B' }))}
+                onClick={() => !readOnly && onUpdatePeriod((p) => ({ ...p, calculationMode: 'B' }))}
               >
                 Chế độ 2 — Tách 3 quỹ
               </button>
@@ -266,8 +292,11 @@ export const Tab3Payroll: React.FC<Tab3Props> = ({ period, calc, onUpdatePeriod 
                 <button
                   key={d}
                   type="button"
+                  disabled={readOnly}
                   className={toggleBtn(period.standardDaysForHS1 === d)}
-                  onClick={() => onUpdatePeriod((p) => ({ ...p, standardDaysForHS1: d }))}
+                  onClick={() =>
+                    !readOnly && onUpdatePeriod((p) => ({ ...p, standardDaysForHS1: d }))
+                  }
                 >
                   {d} công
                 </button>
@@ -318,12 +347,21 @@ export const Tab3Payroll: React.FC<Tab3Props> = ({ period, calc, onUpdatePeriod 
 
       {/* Bảng chi tiết */}
       <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-          <h2 className="text-base font-bold text-slate-900">
-            Bảng lương chi tiết ({calc.rows.length} nhân sự)
-          </h2>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-bold text-slate-900">
+              Bảng lương chi tiết ({calc.rows.length} nhân sự)
+            </h2>
+            {scopeBadge && (
+              <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-900">
+                {scopeBadge}
+              </span>
+            )}
+          </div>
           <span className="text-xs text-slate-500">
-            Sửa trực tiếp Công khoán / Công BD / Trừ thưởng — dán cột nhiều dòng từ Excel vào ô đầu tiên.
+            {readOnly
+              ? 'Chế độ Xem (Chỉ Admin được chỉnh sửa số liệu).'
+              : 'Sửa trực tiếp Công khoán / Công BD / Trừ thưởng — dán cột nhiều dòng từ Excel vào ô đầu tiên.'}
           </span>
         </div>
         <div className="overflow-x-auto">

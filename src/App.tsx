@@ -6,17 +6,24 @@ import {
   CalendarPlus,
   FileSpreadsheet,
   FolderInput,
+  KeyRound,
+  Lock,
+  LogOut,
   Printer,
+  ShieldCheck,
   Trash2,
   Users,
 } from 'lucide-react';
 import type {
   AppState,
+  AuthAccount,
   EmployeeMaster,
   HrChangeLogEntry,
   PayrollPeriod,
   PolicyDecision,
   SignatureConfig,
+  TeamGroup,
+  UserRole,
 } from './types/payroll';
 import { createInitialAppState } from './data/seedOctober2026';
 import { calculatePayroll, formatVND } from './utils/payrollCalc';
@@ -28,6 +35,14 @@ import {
   saveState,
   snapshotFromEmployee,
 } from './utils/periodOps';
+import {
+  buildDefaultAuthAccounts,
+  filterPayrollByRole,
+  getRolePermissions,
+  normalizeMsnv4,
+  sha256Hex,
+  TEAM_LABELS,
+} from './utils/rbacAuth';
 import { exportPayrollToExcel } from './utils/excelExport';
 import { Tab1MonthlyHub } from './components/Tab1MonthlyHub';
 import { Tab2HR } from './components/Tab2HR';
@@ -35,20 +50,57 @@ import { Tab3Payroll } from './components/Tab3Payroll';
 import { Tab4Analytics } from './components/Tab4Analytics';
 import { Tab5Export } from './components/Tab5Export';
 import { PrintPreview } from './components/PrintPreview';
+import { LoginScreen } from './components/LoginScreen';
+import { ChangePinModal, SecurityAdminModal } from './components/SecurityModal';
+import { EmployeeSelfView } from './components/EmployeeSelfView';
 
 type TabKey = 'tab1' | 'tab2' | 'tab3' | 'tab4' | 'tab5';
 
+const SESSION_STORAGE_KEY = 'ktcn_payroll_session_msnv_v1';
+
 export function App() {
   const [state, setState] = useState<AppState>(() => loadState());
+  const [loggedInMsnv, setLoggedInMsnv] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem(SESSION_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  });
   const [activeTab, setActiveTab] = useState<TabKey>('tab3');
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const [newPeriodInput, setNewPeriodInput] = useState<string>('');
   const [showNewPeriodModal, setShowNewPeriodModal] = useState(false);
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
+  const [showChangePinModal, setShowChangePinModal] = useState(false);
 
   useEffect(() => {
     const err = saveState(state);
     setStorageWarning(err);
   }, [state]);
+
+  const authAccounts = useMemo(
+    () => buildDefaultAuthAccounts(state.employees, state.authAccounts),
+    [state.employees, state.authAccounts],
+  );
+
+  const currentEmployee = useMemo(() => {
+    if (!loggedInMsnv) return undefined;
+    const norm = normalizeMsnv4(loggedInMsnv);
+    return state.employees.find((e) => normalizeMsnv4(e.msnv) === norm && e.active);
+  }, [loggedInMsnv, state.employees]);
+
+  const currentAccount = useMemo(() => {
+    if (!currentEmployee) return undefined;
+    const acc = authAccounts[currentEmployee.msnv];
+    if (!acc || !acc.accessGranted) return undefined;
+    return acc;
+  }, [authAccounts, currentEmployee]);
+
+  const perms = useMemo(
+    () => (currentAccount ? getRolePermissions(currentAccount) : null),
+    [currentAccount],
+  );
 
   const periodKeys = useMemo(() => Object.keys(state.periods).sort(), [state.periods]);
   const activePeriod: PayrollPeriod =
@@ -61,9 +113,39 @@ export function App() {
     }));
   }, [periodKeys, state.periods]);
 
-  const activeCalc = useMemo(() => calculatePayroll(activePeriod), [activePeriod]);
+  // Luôn chạy engine tính toán trên toàn bộ 23 nhân sự để đơn giá & tiền lương chuẩn tuyệt đối
+  const fullCalc = useMemo(() => calculatePayroll(activePeriod), [activePeriod]);
 
+  // Lọc kết quả hiển thị theo đúng cấp độ phân quyền (Strict Data Isolation)
+  const visibleCalc = useMemo(() => {
+    if (!currentAccount) return fullCalc;
+    return filterPayrollByRole(fullCalc, currentAccount, authAccounts, state.employees);
+  }, [fullCalc, currentAccount, authAccounts, state.employees]);
+
+  const handleLoginSuccess = (account: AuthAccount) => {
+    setLoggedInMsnv(account.msnv);
+    try {
+      sessionStorage.setItem(SESSION_STORAGE_KEY, account.msnv);
+    } catch {
+      // ignore sessionStorage error
+    }
+    setActiveTab('tab3');
+  };
+
+  const handleLogout = () => {
+    setLoggedInMsnv(null);
+    setShowSecurityModal(false);
+    setShowChangePinModal(false);
+    try {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  };
+
+  // Bảo vệ nghiêm ngặt: Chỉ Admin (canEdit === true) mới được phép thay đổi dữ liệu lương
   const handleUpdatePeriod = (updater: (prev: PayrollPeriod) => PayrollPeriod) => {
+    if (!perms?.canEdit) return;
     setState((prev) => {
       const cur = prev.periods[prev.activePeriodKey];
       if (!cur) return prev;
@@ -79,6 +161,7 @@ export function App() {
   };
 
   const handleOpenNewPeriod = () => {
+    if (!perms?.canEdit) return;
     const latestKey = periodKeys[periodKeys.length - 1] || '2026-10';
     setNewPeriodInput(nextPeriodKey(latestKey));
     setShowNewPeriodModal(true);
@@ -86,6 +169,7 @@ export function App() {
 
   const handleCreateNewPeriod = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!perms?.canEdit) return;
     if (!isValidPeriodKey(newPeriodInput)) return;
     if (state.periods[newPeriodInput]) {
       setState((prev) => ({ ...prev, activePeriodKey: newPeriodInput }));
@@ -107,6 +191,7 @@ export function App() {
   };
 
   const handleDeleteCurrentPeriod = () => {
+    if (!perms?.canEdit) return;
     if (periodKeys.length <= 1) return;
     if (!window.confirm(`Xóa kỳ lương ${activePeriod.label}? Dữ liệu kỳ này sẽ mất vĩnh viễn.`)) {
       return;
@@ -125,6 +210,7 @@ export function App() {
 
   // Tab 1 Policy handlers
   const handleAddPolicy = (policy: PolicyDecision) => {
+    if (!perms?.canEdit) return;
     setState((prev) => ({
       ...prev,
       policies: [policy, ...prev.policies],
@@ -132,6 +218,7 @@ export function App() {
   };
 
   const handleDeletePolicy = (id: string) => {
+    if (!perms?.canEdit) return;
     setState((prev) => ({
       ...prev,
       policies: prev.policies.filter((p) => p.id !== id),
@@ -140,7 +227,8 @@ export function App() {
 
   // Tab 2 HR handlers (preserve historical periods, only update current active period)
   const handleUpsertEmployee = (emp: EmployeeMaster, isNew: boolean): string | null => {
-    if (isNew && state.employees.some((e) => e.msnv === emp.msnv)) {
+    if (!perms?.canEdit) return 'Chỉ Admin mới có quyền chỉnh sửa nhân sự.';
+    if (isNew && state.employees.some((e) => normalizeMsnv4(e.msnv) === normalizeMsnv4(emp.msnv))) {
       return `MSNV ${emp.msnv} đã tồn tại trong danh sách.`;
     }
     setState((prev) => {
@@ -155,6 +243,15 @@ export function App() {
         [emp.msnv]: snapshotFromEmployee(emp, existingRec),
       };
 
+      const nextAuth = buildDefaultAuthAccounts(nextEmployees, prev.authAccounts);
+      if (nextAuth[emp.msnv] && emp.team && emp.role) {
+        nextAuth[emp.msnv] = {
+          ...nextAuth[emp.msnv],
+          team: emp.team,
+          role: emp.role,
+        };
+      }
+
       const logEntry: HrChangeLogEntry = {
         id: `log_${Date.now()}`,
         timestamp: new Date().toISOString(),
@@ -162,12 +259,13 @@ export function App() {
         msnv: emp.msnv,
         fullName: emp.fullName,
         action: isNew ? 'create' : 'update',
-        detail: `${emp.position} | BP: ${emp.department === 'van_phong' ? 'Văn phòng' : 'Dây chuyền'} | HS CV: ${emp.hsCV}, HS TN: ${emp.hsTN}`,
+        detail: `${emp.position} | BP: ${emp.department === 'van_phong' ? 'Văn phòng' : 'Dây chuyền'} | Tổ: ${emp.team ? TEAM_LABELS[emp.team] : ''} | HS CV: ${emp.hsCV}, HS TN: ${emp.hsTN}`,
       };
 
       return {
         ...prev,
         employees: nextEmployees,
+        authAccounts: nextAuth,
         periods: {
           ...prev.periods,
           [prev.activePeriodKey]: {
@@ -182,6 +280,7 @@ export function App() {
   };
 
   const handleToggleLock = (msnv: string) => {
+    if (!perms?.canEdit) return;
     setState((prev) => {
       const target = prev.employees.find((e) => e.msnv === msnv);
       if (!target) return prev;
@@ -227,6 +326,7 @@ export function App() {
   const handleImportEmployees = (
     imported: EmployeeMaster[],
   ): { added: number; updated: number } => {
+    if (!perms?.canEdit) return { added: 0, updated: 0 };
     let added = 0;
     let updated = 0;
     setState((prev) => {
@@ -248,6 +348,9 @@ export function App() {
         }
       }
 
+      const nextEmployees = Array.from(map.values());
+      const nextAuth = buildDefaultAuthAccounts(nextEmployees, prev.authAccounts);
+
       const logEntry: HrChangeLogEntry = {
         id: `log_${Date.now()}`,
         timestamp: new Date().toISOString(),
@@ -260,7 +363,8 @@ export function App() {
 
       return {
         ...prev,
-        employees: Array.from(map.values()),
+        employees: nextEmployees,
+        authAccounts: nextAuth,
         periods: {
           ...prev.periods,
           [prev.activePeriodKey]: {
@@ -275,43 +379,177 @@ export function App() {
   };
 
   const handleUpdateSignatures = (signatures: SignatureConfig) => {
+    if (!perms?.canEdit) return;
     setState((prev) => ({ ...prev, signatures }));
   };
 
-  const tabs: { key: TabKey; label: string; shortLabel: string; icon: React.ReactNode }[] = [
+  // Security & PIN Handlers
+  const handleUpdateAccount = (msnv: string, updater: (prevAcc: AuthAccount) => AuthAccount) => {
+    if (!perms?.canManageSecurity) return;
+    setState((prev) => {
+      const currentAuth = buildDefaultAuthAccounts(prev.employees, prev.authAccounts);
+      const target = currentAuth[msnv];
+      if (!target) return prev;
+      return {
+        ...prev,
+        authAccounts: {
+          ...currentAuth,
+          [msnv]: updater(target),
+        },
+      };
+    });
+  };
+
+  const handleUpdateEmployeeTeamRole = (msnv: string, team: TeamGroup, role: UserRole) => {
+    if (!perms?.canManageSecurity) return;
+    setState((prev) => {
+      const nextEmployees = prev.employees.map((e) =>
+        e.msnv === msnv ? { ...e, team, role } : e,
+      );
+      const currentAuth = buildDefaultAuthAccounts(nextEmployees, prev.authAccounts);
+      if (currentAuth[msnv]) {
+        currentAuth[msnv] = {
+          ...currentAuth[msnv],
+          team,
+          role,
+          updatedAt: new Date().toISOString().slice(0, 10),
+        };
+      }
+      const curPeriod = prev.periods[prev.activePeriodKey];
+      const nextRecords = { ...curPeriod.records };
+      if (nextRecords[msnv]) {
+        nextRecords[msnv] = { ...nextRecords[msnv], team };
+      }
+      return {
+        ...prev,
+        employees: nextEmployees,
+        authAccounts: currentAuth,
+        periods: {
+          ...prev.periods,
+          [prev.activePeriodKey]: {
+            ...curPeriod,
+            records: nextRecords,
+          },
+        },
+      };
+    });
+  };
+
+  const handleBulkGrantAll = (grant: boolean) => {
+    if (!perms?.canManageSecurity) return;
+    setState((prev) => {
+      const currentAuth = buildDefaultAuthAccounts(prev.employees, prev.authAccounts);
+      const nextAuth: Record<string, AuthAccount> = {};
+      for (const [k, acc] of Object.entries(currentAuth)) {
+        const isLeadership = acc.normalizedMsnv === '1439' || acc.normalizedMsnv === '0266';
+        nextAuth[k] = {
+          ...acc,
+          accessGranted: grant ? true : isLeadership,
+          updatedAt: new Date().toISOString().slice(0, 10),
+        };
+      }
+      return { ...prev, authAccounts: nextAuth };
+    });
+  };
+
+  const handleBulkResetDefaultPins = () => {
+    if (!perms?.canManageSecurity) return;
+    setState((prev) => {
+      const currentAuth = buildDefaultAuthAccounts(prev.employees, prev.authAccounts);
+      const nextAuth: Record<string, AuthAccount> = {};
+      for (const [k, acc] of Object.entries(currentAuth)) {
+        const defPin = acc.normalizedMsnv;
+        nextAuth[k] = {
+          ...acc,
+          pinHash: sha256Hex(defPin),
+          pinDisplayForAdmin: defPin,
+          updatedAt: new Date().toISOString().slice(0, 10),
+        };
+      }
+      return { ...prev, authAccounts: nextAuth };
+    });
+  };
+
+  const handleChangeOwnPin = (newPin: string) => {
+    if (!currentAccount) return;
+    setState((prev) => {
+      const currentAuth = buildDefaultAuthAccounts(prev.employees, prev.authAccounts);
+      const acc = currentAuth[currentAccount.msnv];
+      if (!acc) return prev;
+      return {
+        ...prev,
+        authAccounts: {
+          ...currentAuth,
+          [currentAccount.msnv]: {
+            ...acc,
+            pinHash: sha256Hex(newPin),
+            pinDisplayForAdmin: newPin,
+            updatedAt: new Date().toISOString().slice(0, 10),
+          },
+        },
+      };
+    });
+  };
+
+  // Nếu chưa đăng nhập hoặc tài khoản bị thu hồi quyền -> Hiển thị màn hình Đăng nhập PIN 4 số
+  if (!currentAccount || !currentEmployee || !perms) {
+    return (
+      <LoginScreen
+        employees={state.employees}
+        authAccounts={authAccounts}
+        onLoginSuccess={handleLoginSuccess}
+      />
+    );
+  }
+
+  const allTabs: {
+    key: TabKey;
+    label: string;
+    shortLabel: string;
+    icon: React.ReactNode;
+    visible: boolean;
+  }[] = [
     {
       key: 'tab1',
       label: 'Tab 1: Nhập liệu & Chứng từ tháng',
       shortLabel: '1. Nhập liệu & Chứng từ',
       icon: <FolderInput className="h-4 w-4" />,
+      visible: perms.canViewAllRoom,
     },
     {
       key: 'tab2',
       label: 'Tab 2: Quản lý Nhân sự & Hệ số',
       shortLabel: '2. Nhân sự & Hệ số',
       icon: <Users className="h-4 w-4" />,
+      visible: perms.canViewAllRoom,
     },
     {
       key: 'tab3',
       label: 'Tab 3: Bảng Tính lương & Đối soát',
-      shortLabel: '3. Bảng Tính lương',
+      shortLabel: perms.canViewTeamOnly
+        ? `Bảng lương ${TEAM_LABELS[currentAccount.team]}`
+        : '3. Bảng Tính lương',
       icon: <Calculator className="h-4 w-4" />,
+      visible: !perms.isSelfOnly,
     },
     {
       key: 'tab4',
       label: 'Tab 4: Phân tích & Biến động tháng',
       shortLabel: '4. Báo cáo Phân tích',
       icon: <BarChart3 className="h-4 w-4" />,
+      visible: perms.canViewAllRoom,
     },
     {
       key: 'tab5',
       label: 'Tab 5: Xuất Excel NĐ30 & Sao lưu',
-      shortLabel: '5. Xuất NĐ30 & In/Sao lưu',
+      shortLabel: perms.canViewTeamOnly ? 'Xuất Excel & In Tổ' : '5. Xuất NĐ30 & In/Sao lưu',
       icon: <FileSpreadsheet className="h-4 w-4" />,
+      visible: !perms.isSelfOnly,
     },
   ];
 
-  const { summary } = activeCalc;
+  const visibleTabs = allTabs.filter((t) => t.visible);
+  const { summary } = fullCalc;
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
@@ -323,8 +561,24 @@ export function App() {
               <Building2 className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-[11px] font-semibold tracking-wider text-blue-300 uppercase">
-                Công ty Cổ phần Gạch Men Phương Nam
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-semibold tracking-wider text-blue-300 uppercase">
+                  Công ty Cổ phần Gạch Men Phương Nam
+                </span>
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
+                    perms.canEdit
+                      ? 'bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-400/40'
+                      : 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-400/40'
+                  }`}
+                >
+                  {perms.canEdit ? (
+                    <ShieldCheck className="h-3 w-3" />
+                  ) : (
+                    <Lock className="h-3 w-3" />
+                  )}
+                  {perms.badgeText}
+                </span>
               </div>
               <h1 className="text-base font-bold tracking-tight sm:text-lg">
                 Hệ thống Quản lý & Tính lương Phòng Kỹ thuật - Công nghệ
@@ -333,9 +587,18 @@ export function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* Thông tin User đang đăng nhập */}
+            <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/90 px-3 py-1.5 text-xs">
+              <span className="font-mono font-bold text-amber-300">
+                {currentAccount.normalizedMsnv}
+              </span>
+              <span className="font-semibold text-white">{currentEmployee.fullName}</span>
+              <span className="hidden text-slate-400 sm:inline">({currentEmployee.position})</span>
+            </div>
+
             {/* Chọn kỳ lương */}
             <div className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs">
-              <span className="text-slate-400">Kỳ lương:</span>
+              <span className="text-slate-400">Kỳ:</span>
               <select
                 value={activePeriod.periodKey}
                 onChange={(e) =>
@@ -351,28 +614,42 @@ export function App() {
               </select>
             </div>
 
-            <button
-              type="button"
-              onClick={handleOpenNewPeriod}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-500"
-            >
-              <CalendarPlus className="h-3.5 w-3.5" /> Tạo kỳ mới từ tháng trước
-            </button>
+            {perms.canEdit && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleOpenNewPeriod}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-500"
+                >
+                  <CalendarPlus className="h-3.5 w-3.5" /> Tạo kỳ mới
+                </button>
 
-            {periodKeys.length > 1 && (
+                {periodKeys.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteCurrentPeriod}
+                    className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs text-rose-300 hover:bg-rose-950"
+                    title="Xóa kỳ lương đang mở"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </>
+            )}
+
+            {perms.canManageSecurity && (
               <button
                 type="button"
-                onClick={handleDeleteCurrentPeriod}
-                className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs text-rose-300 hover:bg-rose-950"
-                title="Xóa kỳ lương đang mở"
+                onClick={() => setShowSecurityModal(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-slate-950 shadow hover:bg-amber-400"
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <ShieldCheck className="h-3.5 w-3.5" /> Quản lý Bảo mật & PIN
               </button>
             )}
 
             <button
               type="button"
-              onClick={() => exportPayrollToExcel(activePeriod, activeCalc, state.signatures)}
+              onClick={() => exportPayrollToExcel(activePeriod, visibleCalc, state.signatures)}
               className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
             >
               <FileSpreadsheet className="h-3.5 w-3.5" /> Xuất Excel NĐ30
@@ -383,38 +660,81 @@ export function App() {
               onClick={() => window.print()}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-100 hover:bg-slate-700"
             >
-              <Printer className="h-3.5 w-3.5" /> In / Xuất PDF
+              <Printer className="h-3.5 w-3.5" /> In / PDF
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowChangePinModal(true)}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-600 bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
+              title="Đổi mã PIN 4 số cá nhân"
+            >
+              <KeyRound className="h-3.5 w-3.5 text-amber-300" /> Đổi mã PIN
+            </button>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="inline-flex items-center gap-1 rounded-lg bg-rose-600/90 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-rose-600"
+              title="Đăng xuất khỏi hệ thống"
+            >
+              <LogOut className="h-3.5 w-3.5" /> Đăng xuất
             </button>
           </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="mx-auto max-w-[1600px] px-4">
-          <nav className="flex gap-1 overflow-x-auto pt-1">
-            {tabs.map((t) => {
-              const isActive = activeTab === t.key;
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setActiveTab(t.key)}
-                  className={`inline-flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-xs font-semibold whitespace-nowrap transition ${
-                    isActive
-                      ? 'bg-slate-100 text-blue-700 shadow-sm'
-                      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  }`}
-                >
-                  {t.icon}
-                  <span>{t.shortLabel}</span>
-                </button>
-              );
-            })}
-          </nav>
-        </div>
+        {/* Navigation Tabs (ẩn với Cấp 4 vì Cấp 4 có giao diện Phiếu lương cá nhân chuyên biệt) */}
+        {!perms.isSelfOnly && (
+          <div className="mx-auto max-w-[1600px] px-4">
+            <nav className="flex gap-1 overflow-x-auto pt-1">
+              {visibleTabs.map((t) => {
+                const isActive = activeTab === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setActiveTab(t.key)}
+                    className={`inline-flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-xs font-semibold whitespace-nowrap transition ${
+                      isActive
+                        ? 'bg-slate-100 text-blue-700 shadow-sm'
+                        : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                    }`}
+                  >
+                    {t.icon}
+                    <span>{t.shortLabel}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+        )}
       </header>
 
+      {/* Modal Quản lý Bảo mật & Cấp mã PIN (Chỉ Admin 1439) */}
+      {showSecurityModal && perms.canManageSecurity && (
+        <SecurityAdminModal
+          employees={state.employees}
+          authAccounts={authAccounts}
+          onUpdateAccount={handleUpdateAccount}
+          onUpdateEmployeeTeamRole={handleUpdateEmployeeTeamRole}
+          onBulkGrantAll={handleBulkGrantAll}
+          onBulkResetDefaultPins={handleBulkResetDefaultPins}
+          onClose={() => setShowSecurityModal(false)}
+        />
+      )}
+
+      {/* Modal Đổi mã PIN cá nhân (Mọi cấp) */}
+      {showChangePinModal && (
+        <ChangePinModal
+          account={currentAccount}
+          employeeName={currentEmployee.fullName}
+          onChangePin={handleChangeOwnPin}
+          onClose={() => setShowChangePinModal(false)}
+        />
+      )}
+
       {/* Modal tạo kỳ lương mới */}
-      {showNewPeriodModal && (
+      {showNewPeriodModal && perms.canEdit && (
         <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <form
             onSubmit={handleCreateNewPeriod}
@@ -466,7 +786,7 @@ export function App() {
           </div>
         )}
 
-        {/* KPI Strip */}
+        {/* KPI Strip (Thông tin Quỹ chung minh bạch toàn phòng) */}
         <div className="no-print mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
             <div className="text-[11px] font-medium text-slate-500">Quỹ lương sản lượng khoán</div>
@@ -514,56 +834,83 @@ export function App() {
           </div>
         </div>
 
-        {/* Active Tab View */}
-        <div className={activeTab === 'tab5' ? '' : 'no-print'}>
-          {activeTab === 'tab1' && (
-            <Tab1MonthlyHub
-              period={activePeriod}
-              calc={activeCalc}
-              employees={state.employees}
-              policies={state.policies}
-              onUpdatePeriod={handleUpdatePeriod}
-              onAddPolicy={handleAddPolicy}
-              onDeletePolicy={handleDeletePolicy}
-            />
-          )}
-          {activeTab === 'tab2' && (
-            <Tab2HR
-              employees={state.employees}
-              hrChangeLog={state.hrChangeLog}
-              activePeriodLabel={activePeriod.label}
-              onUpsertEmployee={handleUpsertEmployee}
-              onToggleLock={handleToggleLock}
-              onImportEmployees={handleImportEmployees}
-            />
-          )}
-          {activeTab === 'tab3' && (
-            <Tab3Payroll
-              period={activePeriod}
-              calc={activeCalc}
-              onUpdatePeriod={handleUpdatePeriod}
-            />
-          )}
-          {activeTab === 'tab4' && (
-            <Tab4Analytics items={allCalcs} activePeriodKey={activePeriod.periodKey} />
-          )}
-          {activeTab === 'tab5' && (
-            <Tab5Export
-              state={state}
-              period={activePeriod}
-              calc={activeCalc}
-              onUpdateSignatures={handleUpdateSignatures}
-              onRestore={(restored) => setState(restored)}
-              onResetSample={() => setState(createInitialAppState())}
-            />
-          )}
-        </div>
+        {/* Giao diện theo Cấp phân quyền */}
+        {perms.isSelfOnly ? (
+          <>
+            <div className="no-print">
+              <EmployeeSelfView
+                period={activePeriod}
+                isolatedCalc={visibleCalc}
+                account={currentAccount}
+                policies={state.policies}
+                signatures={state.signatures}
+              />
+            </div>
+            <div className="hidden print:block">
+              <PrintPreview period={activePeriod} calc={visibleCalc} sig={state.signatures} />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className={activeTab === 'tab5' ? '' : 'no-print'}>
+              {activeTab === 'tab1' && perms.canViewAllRoom && (
+                <Tab1MonthlyHub
+                  period={activePeriod}
+                  calc={visibleCalc}
+                  employees={state.employees}
+                  policies={state.policies}
+                  onUpdatePeriod={handleUpdatePeriod}
+                  onAddPolicy={handleAddPolicy}
+                  onDeletePolicy={handleDeletePolicy}
+                  readOnly={!perms.canEdit}
+                />
+              )}
+              {activeTab === 'tab2' && perms.canViewAllRoom && (
+                <Tab2HR
+                  employees={state.employees}
+                  hrChangeLog={state.hrChangeLog}
+                  activePeriodLabel={activePeriod.label}
+                  onUpsertEmployee={handleUpsertEmployee}
+                  onToggleLock={handleToggleLock}
+                  onImportEmployees={handleImportEmployees}
+                  readOnly={!perms.canEdit}
+                />
+              )}
+              {activeTab === 'tab3' && (
+                <Tab3Payroll
+                  period={activePeriod}
+                  calc={visibleCalc}
+                  onUpdatePeriod={handleUpdatePeriod}
+                  readOnly={!perms.canEdit}
+                  scopeBadge={perms.scopeTitle}
+                />
+              )}
+              {activeTab === 'tab4' && perms.canViewAllRoom && (
+                <Tab4Analytics items={allCalcs} activePeriodKey={activePeriod.periodKey} />
+              )}
+              {activeTab === 'tab5' && (
+                <Tab5Export
+                  state={state}
+                  period={activePeriod}
+                  calc={visibleCalc}
+                  onUpdateSignatures={handleUpdateSignatures}
+                  onRestore={(restored) => {
+                    if (perms.canEdit) setState(restored);
+                  }}
+                  onResetSample={() => {
+                    if (perms.canEdit) setState(createInitialAppState());
+                  }}
+                  readOnly={!perms.canEdit}
+                />
+              )}
+            </div>
 
-        {/* Nếu bấm Ctrl+P / In từ Tab 1-4 thì vẫn in ra đúng mẫu NĐ30 */}
-        {activeTab !== 'tab5' && (
-          <div className="hidden print:block">
-            <PrintPreview period={activePeriod} calc={activeCalc} sig={state.signatures} />
-          </div>
+            {activeTab !== 'tab5' && (
+              <div className="hidden print:block">
+                <PrintPreview period={activePeriod} calc={visibleCalc} sig={state.signatures} />
+              </div>
+            )}
+          </>
         )}
       </main>
     </div>

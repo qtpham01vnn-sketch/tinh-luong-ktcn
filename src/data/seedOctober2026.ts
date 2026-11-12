@@ -5,8 +5,9 @@ import type {
   PayrollPeriod,
   SignatureConfig,
 } from '../types/payroll';
+import { buildDefaultAuthAccounts, inferDefaultRoleAndTeam } from '../utils/rbacAuth';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const DEFAULT_SIGNATURES: SignatureConfig = {
   docNumber: '',
@@ -60,21 +61,27 @@ const SEED_EMPLOYEES_WITH_ATTENDANCE: SeedEmpInput[] = [
 ];
 
 export function createInitialAppState(): AppState {
-  const employees: EmployeeMaster[] = SEED_EMPLOYEES_WITH_ATTENDANCE.map((e, idx) => ({
-    id: `emp_${e.msnv}`,
-    msnv: e.msnv,
-    fullName: e.fullName,
-    position: e.position,
-    department: e.department,
-    baseSalary2020: e.baseSalary2020,
-    hsCV: e.hsCV,
-    hsTN: e.hsTN,
-    active: true,
-    sortOrder: idx + 1,
-  }));
+  const employees: EmployeeMaster[] = SEED_EMPLOYEES_WITH_ATTENDANCE.map((e, idx) => {
+    const { role, team } = inferDefaultRoleAndTeam(e.msnv, e.position);
+    return {
+      id: `emp_${e.msnv}`,
+      msnv: e.msnv,
+      fullName: e.fullName,
+      position: e.position,
+      department: e.department,
+      team,
+      role,
+      baseSalary2020: e.baseSalary2020,
+      hsCV: e.hsCV,
+      hsTN: e.hsTN,
+      active: true,
+      sortOrder: idx + 1,
+    };
+  });
 
   const records: Record<string, AttendanceRecord> = {};
   SEED_EMPLOYEES_WITH_ATTENDANCE.forEach((e, idx) => {
+    const { team } = inferDefaultRoleAndTeam(e.msnv, e.position);
     records[e.msnv] = {
       msnv: e.msnv,
       congKhoan: e.congKhoan,
@@ -86,9 +93,12 @@ export function createInitialAppState(): AppState {
       fullName: e.fullName,
       position: e.position,
       department: e.department,
+      team,
       sortOrder: idx + 1,
     };
   });
+
+  const authAccounts = buildDefaultAuthAccounts(employees);
 
   const oct2026: PayrollPeriod = {
     periodKey: '2026-10',
@@ -142,6 +152,7 @@ export function createInitialAppState(): AppState {
     schemaVersion: SCHEMA_VERSION,
     hrChangeLog: [],
     signatures: { ...DEFAULT_SIGNATURES },
+    authAccounts,
     employees,
     periods: {
       '2026-10': oct2026,

@@ -38,6 +38,7 @@ interface Tab1Props {
   onUpdatePeriod: (updater: (prev: PayrollPeriod) => PayrollPeriod) => void;
   onAddPolicy: (policy: PolicyDecision) => void;
   onDeletePolicy: (id: string) => void;
+  readOnly?: boolean;
 }
 
 export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
@@ -48,6 +49,7 @@ export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
   onUpdatePeriod,
   onAddPolicy,
   onDeletePolicy,
+  readOnly = false,
 }) => {
   // Paste / Preview state for Attendance
   const [pasteText, setPasteText] = useState('');
@@ -249,7 +251,12 @@ export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <fieldset disabled={readOnly} className="space-y-6">
+      {readOnly && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-semibold text-amber-900">
+          Chế độ Xem (Chỉ Admin được chỉnh sửa số liệu, thêm giảm trừ hoặc upload chứng từ).
+        </div>
+      )}
       {/* 1. Sản lượng, Đơn giá & Quỹ Bảo dưỡng */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -905,6 +912,6 @@ export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
           ))}
         </div>
       </section>
-    </div>
+    </fieldset>
   );
 };

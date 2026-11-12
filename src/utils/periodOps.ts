@@ -6,6 +6,7 @@ import type {
   PolicyDecision,
 } from '../types/payroll';
 import { createInitialAppState, DEFAULT_SIGNATURES, SCHEMA_VERSION } from '../data/seedOctober2026';
+import { buildDefaultAuthAccounts, inferDefaultRoleAndTeam } from './rbacAuth';
 
 export function periodLabel(periodKey: string): string {
   const [y, m] = periodKey.split('-');
@@ -27,11 +28,13 @@ export function snapshotFromEmployee(
   e: EmployeeMaster,
   carry?: Partial<AttendanceRecord>,
 ): AttendanceRecord {
+  const { team } = inferDefaultRoleAndTeam(e.msnv, e.position);
   return {
     msnv: e.msnv,
     fullName: e.fullName,
     position: e.position,
     department: e.department,
+    team: e.team ?? carry?.team ?? team,
     baseSalary2020: e.baseSalary2020,
     hsCV: e.hsCV,
     hsTN: e.hsTN,
@@ -94,12 +97,19 @@ export function normalizeAppState(raw: unknown): AppState {
   if (!Array.isArray(s.employees) || !s.periods || typeof s.periods !== 'object') {
     throw new Error('Thiếu danh sách nhân sự hoặc kỳ lương');
   }
-  const employees: EmployeeMaster[] = s.employees.map((e, i) => ({
-    ...e,
-    sortOrder: typeof e.sortOrder === 'number' ? e.sortOrder : i + 1,
-    active: e.active !== false,
-  }));
+  const employees: EmployeeMaster[] = s.employees.map((e, i) => {
+    const defaults = inferDefaultRoleAndTeam(e.msnv, e.position);
+    return {
+      ...e,
+      team: e.team ?? defaults.team,
+      role: e.role ?? defaults.role,
+      sortOrder: typeof e.sortOrder === 'number' ? e.sortOrder : i + 1,
+      active: e.active !== false,
+    };
+  });
+  const authAccounts = buildDefaultAuthAccounts(employees, s.authAccounts);
   const orderMap = new Map(employees.map((e) => [e.msnv, e.sortOrder]));
+  const teamMap = new Map(employees.map((e) => [e.msnv, e.team]));
 
   const periods: Record<string, PayrollPeriod> = {};
   for (const [key, p] of Object.entries(s.periods)) {
@@ -108,6 +118,7 @@ export function normalizeAppState(raw: unknown): AppState {
     for (const [msnv, r] of Object.entries(p.records ?? {})) {
       records[msnv] = {
         ...r,
+        team: r.team ?? teamMap.get(msnv) ?? inferDefaultRoleAndTeam(msnv, r.position).team,
         sortOrder: typeof r.sortOrder === 'number' ? r.sortOrder : orderMap.get(msnv) ?? 999,
         congKhoan: Number(r.congKhoan) || 0,
         congBD: Number(r.congBD) || 0,
@@ -137,6 +148,7 @@ export function normalizeAppState(raw: unknown): AppState {
     policies: Array.isArray(s.policies) ? s.policies : [],
     hrChangeLog: Array.isArray(s.hrChangeLog) ? s.hrChangeLog : [],
     signatures: { ...DEFAULT_SIGNATURES, ...(s.signatures ?? {}) },
+    authAccounts,
   };
 }
 

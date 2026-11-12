@@ -13,6 +13,7 @@ interface Tab5Props {
   onUpdateSignatures: (sig: SignatureConfig) => void;
   onRestore: (state: AppState) => void;
   onResetSample: () => void;
+  readOnly?: boolean;
 }
 
 const MAX_BACKUP_BYTES = 20 * 1024 * 1024;
@@ -24,6 +25,7 @@ export const Tab5Export: React.FC<Tab5Props> = ({
   onUpdateSignatures,
   onRestore,
   onResetSample,
+  readOnly = false,
 }) => {
   const sig = state.signatures;
   const [busy, setBusy] = useState(false);
@@ -93,7 +95,7 @@ export const Tab5Export: React.FC<Tab5Props> = ({
             Font Times New Roman, Quốc hiệu – Tiêu ngữ, Số/ký hiệu, Địa danh – ngày tháng, chức danh người ký in hoa
             đậm, Nơi nhận. Khổ A4 ngang, lề trên/dưới 20 mm, trái 30 mm, phải 15 mm.
           </p>
-          <div className="grid gap-3 sm:grid-cols-4">
+          <fieldset disabled={readOnly} className="grid gap-3 sm:grid-cols-4">
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-700">Số văn bản</label>
               <input value={sig.docNumber} onChange={(e) => setSig('docNumber', e.target.value)} placeholder="VD: 15" className={inputCls} />
@@ -123,7 +125,7 @@ export const Tab5Export: React.FC<Tab5Props> = ({
               <label className="mb-1 block text-xs font-semibold text-slate-700">P.TGĐ Phụ trách</label>
               <input value={sig.deputyInCharge} onChange={(e) => setSig('deputyInCharge', e.target.value)} className={inputCls} />
             </div>
-          </div>
+          </fieldset>
         </div>
 
         <div className="space-y-2.5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -143,32 +145,46 @@ export const Tab5Export: React.FC<Tab5Props> = ({
           >
             <Printer className="h-4 w-4" /> In / Lưu PDF (bản xem trước bên dưới)
           </button>
-          <button
-            type="button"
-            onClick={handleBackup}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            <DatabaseBackup className="h-4 w-4" /> Sao lưu dữ liệu (JSON)
-          </button>
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            <Upload className="h-4 w-4" /> Khôi phục từ file JSON
-          </button>
-          <input ref={fileRef} type="file" accept=".json,application/json" className="hidden" onChange={handleRestore} />
-          <button
-            type="button"
-            onClick={() => {
-              if (window.confirm('Xóa toàn bộ dữ liệu và nạp lại dữ liệu mẫu tháng 10/2026? Hãy sao lưu trước!')) {
-                onResetSample();
-              }
-            }}
-            className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50"
-          >
-            <RotateCcw className="h-3.5 w-3.5" /> Nạp lại dữ liệu mẫu T10/2026
-          </button>
+          {!readOnly && (
+            <>
+              <button
+                type="button"
+                onClick={handleBackup}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <DatabaseBackup className="h-4 w-4" /> Sao lưu dữ liệu (JSON)
+              </button>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <Upload className="h-4 w-4" /> Khôi phục từ file JSON
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".json,application/json"
+                className="hidden"
+                onChange={handleRestore}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      'Xóa toàn bộ dữ liệu và nạp lại dữ liệu mẫu tháng 10/2026? Hãy sao lưu trước!',
+                    )
+                  ) {
+                    onResetSample();
+                  }
+                }}
+                className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50"
+              >
+                <RotateCcw className="h-3.5 w-3.5" /> Nạp lại dữ liệu mẫu T10/2026
+              </button>
+            </>
+          )}
           <p className="text-[11px] text-slate-500">
             Dữ liệu tự động lưu trên trình duyệt (localStorage). Khi in: chọn máy in “Microsoft Print to PDF / Save as
             PDF”, khổ A4, hướng ngang.
