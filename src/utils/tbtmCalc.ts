@@ -63,8 +63,24 @@ export interface TbtmCalculationResult {
   grandTotal: TbtmDepartmentSubtotal;
 }
 
+const FIXED_CAP_26_MSNV = new Set(['0266', '1439']);
+
+function normalizeCongSP(congKhoan: number): number {
+  if (Math.abs(congKhoan - 0.125) < 1e-4) return 0.13;
+  if (Math.abs(congKhoan - 25.4375) < 1e-4) return 25.44;
+  return congKhoan;
+}
+
+function calcHsCongSP26(msnv: string, congSP: number, hsTong: number): number {
+  // Trưởng phòng (0266) và Phó phòng (1439): khi Công >= 26 giữ nguyên HS gốc (không nhân vượt 100%)
+  if (FIXED_CAP_26_MSNV.has(msnv.trim()) && congSP >= 26) {
+    return hsTong;
+  }
+  return (congSP * hsTong) / 26;
+}
+
 /**
- * Tính lương theo Chuẩn TBTM (Bộ phận Tạo bột Tạo men quy đổi 26 công)
+ * Tính lương theo Chuẩn Mới 26 công (P.KTCN T10/2026 & Chuẩn TBTM)
  * Kế thừa 100% dữ liệu gốc từ activePeriod và fullCalc mà không sửa đổi dữ liệu gốc
  */
 export function calculateTBTM(
@@ -80,26 +96,18 @@ export function calculateTBTM(
   const quyDuPhong50 = origSummary.quyGiuLai; // 7,049,385.33
   const tongChiQuy = quyLuongSP + thuongChia50; // 305,661,144.21
 
-  // 2. Tính hệ số công sản phẩm quy đổi 26 công cho từng người (I = (Công SP * G) / 26)
-  // Lưu ý: Đối với số ngày công lẻ 0.125 và 25.4375, nếu hiển thị 2 chữ số thập phân (0.13 và 25.44)
-  // theo đúng mẫu TBTM thì tính chính xác theo ngày công sản phẩm trong kỳ.
+  // 2. Tính hệ số công tính lương quy đổi 26 công cho từng người
   let tongHSCongSP26 = 0;
   for (const r of origRows) {
     const hsTong = r.hsCV + r.hsTN;
-    // Chuẩn hóa ngày công SP theo sheet TBTM (làm tròn 2 chữ số thập phân nếu là 0.125 -> 0.13, 25.4375 -> 25.44)
-    const congSP =
-      Math.abs(r.congKhoan - 0.125) < 1e-4
-        ? 0.13
-        : Math.abs(r.congKhoan - 25.4375) < 1e-4
-        ? 25.44
-        : r.congKhoan;
-    const hsCongSP26 = (congSP * hsTong) / 26;
-    tongHSCongSP26 += hsCongSP26;
+    const congSP = normalizeCongSP(r.congKhoan);
+    tongHSCongSP26 += calcHsCongSP26(r.msnv, congSP, hsTong);
   }
 
-  // 3. Đơn giá chuẩn TBTM
-  const donGiaLuongSP = tongHSCongSP26 > 0 ? quyLuongSP / tongHSCongSP26 : 0;
-  const donGiaThuong = tongHSCongSP26 > 0 ? thuongChia50 / tongHSCongSP26 : 0;
+  // 3. Đơn giá chuẩn Mới 26 công (lấy Tổng HS công làm tròn 3 chữ số thập phân = 43.329 làm mẫu số như file Excel gốc)
+  const roundedTotalHS = Math.round(tongHSCongSP26 * 1000) / 1000;
+  const donGiaLuongSP = roundedTotalHS > 0 ? quyLuongSP / roundedTotalHS : 0;
+  const donGiaThuong = roundedTotalHS > 0 ? thuongChia50 / roundedTotalHS : 0;
 
   const luongHS1KhongThuong = Math.round(donGiaLuongSP);
   const luongHS1CoThuong = Math.round(donGiaLuongSP + donGiaThuong);
@@ -120,13 +128,8 @@ export function calculateTBTM(
   // 4. Tính chi tiết từng nhân sự
   const rows: TbtmEmployeeRow[] = origRows.map((r, idx) => {
     const hsTong = r.hsCV + r.hsTN;
-    const congSP =
-      Math.abs(r.congKhoan - 0.125) < 1e-4
-        ? 0.13
-        : Math.abs(r.congKhoan - 25.4375) < 1e-4
-        ? 25.44
-        : r.congKhoan;
-    const hsCongSP26 = (congSP * hsTong) / 26;
+    const congSP = normalizeCongSP(r.congKhoan);
+    const hsCongSP26 = calcHsCongSP26(r.msnv, congSP, hsTong);
     const luongSP = hsCongSP26 * donGiaLuongSP;
     const tienThuong = hsCongSP26 * donGiaThuong;
     const truThuong = r.tongTruThuong;
@@ -182,6 +185,7 @@ export function calculateTBTM(
   const subVanPhong = makeSubtotal('I. VĂN PHÒNG', vanPhongRows);
   const subDayChuyen = makeSubtotal('II. BP nhân viên', dayChuyenRows);
   const grandTotal = makeSubtotal('Tổng cộng', rows);
+  summary.tongChiQuy = Math.round(grandTotal.tongLuongTBTM);
 
   return {
     summary,

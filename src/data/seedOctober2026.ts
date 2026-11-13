@@ -160,6 +160,16 @@ export function createInitialAppState(): AppState {
     activePeriodKey: '2026-10',
     policies: [
       {
+        id: 'pol_01_ksx_2026',
+        code: '01/KSX-2026/PNC-QĐ',
+        title: 'Quyết định khoán lương Bộ phận sản xuất (DC1, DC2, TBTM) năm 2026',
+        effectiveFrom: '2026-04',
+        bonusSharePct: 50,
+        baseSalaryDefault: 5310000,
+        notes: 'Ban hành 01/04/2026 bởi TGĐ Đinh Khắc Trung. Quy định định mức sản lượng, tỷ lệ A1, thang thưởng phạt SL/CL (+2%, +4%, -2%, -4%) cho gạch 30x60, 40x80, 50x50, 60x60 (Bóng, Matt, Sugar), cơ chế trừ khiếu nại 50% và trích quỹ dự phòng 50%.',
+        createdAt: '2026-04-01',
+      },
+      {
         id: 'pol_2026_default',
         code: 'QĐ-KHOÁN-2026',
         title: 'Quy định giao khoán sản lượng & thưởng Phòng KTCN năm 2026',

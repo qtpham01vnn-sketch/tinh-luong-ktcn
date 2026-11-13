@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   AlertTriangle,
+  Building2,
   CheckCircle2,
   ClipboardPaste,
   FileCheck2,
@@ -257,6 +258,81 @@ export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
           Chế độ Xem (Chỉ Admin được chỉnh sửa số liệu, thêm giảm trừ hoặc upload chứng từ).
         </div>
       )}
+
+      {/* Header Banner — đồng bộ giao diện với PXSX & PXCĐ-NL */}
+      <div className="rounded-xl border border-blue-200 bg-gradient-to-r from-blue-900 to-slate-900 p-5 text-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-amber-400" />
+              <h2 className="text-lg font-bold">
+                Phòng Kỹ thuật - Công nghệ (P.KTCN) – {period.label}
+              </h2>
+            </div>
+            <p className="mt-1 text-xs text-blue-200">
+              Nhân sự: <strong>{employees.length} CBCNV</strong> | Tổng công khoán:{' '}
+              <strong>{formatDecimal(calc.summary.tongCongKhoan, 2)}</strong> | Tổng HS ngày công:{' '}
+              <strong>{formatDecimal(calc.summary.tongHSNgayCong, 2)} HS</strong>
+            </p>
+          </div>
+          <div className="rounded-lg bg-white/10 px-4 py-2 text-right backdrop-blur-sm">
+            <div className="text-[11px] uppercase tracking-wider text-blue-200">
+              Tổng chia lương + thưởng P.KTCN
+            </div>
+            <div className="text-xl font-extrabold text-amber-300">
+              {formatVND(calc.summary.quyThucChia)} đ
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 3 Cards Tổng hợp Quỹ P.KTCN — đồng bộ PXSX & PXCĐ-NL */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="text-xs font-semibold uppercase text-slate-500">
+            1. Quỹ lương Khoán &amp; Bảo dưỡng
+          </div>
+          <div className="mt-1 text-2xl font-extrabold text-blue-700">
+            {formatVND(calc.summary.quyKhoan + calc.summary.quyBD)} đ
+          </div>
+          <div className="mt-2 space-y-0.5 text-xs text-slate-600">
+            <div>Quỹ sản lượng khoán: {formatVND(calc.summary.quyKhoan)} đ</div>
+            <div>Lương bảo dưỡng DC2: {formatVND(calc.summary.quyBD)} đ</div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="text-xs font-semibold uppercase text-slate-500">
+            2. Thưởng SL + CL ({period.bonusSharePct}% chi tháng)
+          </div>
+          <div className="mt-1 text-2xl font-extrabold text-emerald-700">
+            {formatVND(calc.summary.thuongChia)} đ
+          </div>
+          <div className="mt-2 space-y-0.5 text-xs text-slate-600">
+            <div>Thưởng gộp trước giảm trừ: {formatVND(calc.summary.thuongGop)} đ</div>
+            <div className="text-amber-700">Quỹ phòng giữ lại: {formatVND(calc.summary.quyGiuLai)} đ</div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="text-xs font-semibold uppercase text-slate-500">
+            3. Trừ Khiếu nại &amp; Lương HS 1
+          </div>
+          <div className="mt-1 text-2xl font-extrabold text-slate-900">
+            {formatVND(calc.summary.quyThucChia)} đ
+          </div>
+          <div className="mt-2 space-y-0.5 text-xs text-slate-600">
+            <div className="text-rose-600">
+              Trừ quỹ thưởng chung: -{formatVND(calc.summary.giamTruChung)} đ
+            </div>
+            <div>
+              Lương Hệ số 1 (26 công):{' '}
+              <strong className="text-blue-700">{formatVND(calc.summary.luongHS1)} đ</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* 1. Sản lượng, Đơn giá & Quỹ Bảo dưỡng */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -324,11 +400,11 @@ export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold text-slate-600">
                   <th className="px-3 py-2">Tên cụm / Dây chuyền</th>
-                  <th className="px-3 py-2 text-right">Đơn giá khoán (đ)</th>
                   <th className="px-3 py-2 text-right">Sản lượng / HS</th>
-                  <th className="px-3 py-2 text-right">Thành tiền Quỹ khoán</th>
+                  <th className="px-3 py-2 text-right">Đơn giá khoán (đ)</th>
                   <th className="px-3 py-2 text-right">% Thưởng SL</th>
                   <th className="px-3 py-2 text-right">% Thưởng CL</th>
+                  <th className="px-3 py-2 text-right">Thành tiền Quỹ khoán</th>
                   <th className="px-3 py-2 text-right">Thưởng gộp cụm (đ)</th>
                   <th className="px-3 py-2 text-center">Xóa</th>
                 </tr>
@@ -351,22 +427,19 @@ export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
                         <input
                           type="number"
                           step="0.01"
-                          value={c.unitPrice}
-                          onChange={(e) => handleClusterChange(c.id, 'unitPrice', e.target.value)}
-                          className="w-32 rounded border border-slate-200 px-2 py-1 text-right text-sm tabular-nums focus:border-blue-500 focus:outline-none"
+                          value={c.quantity}
+                          onChange={(e) => handleClusterChange(c.id, 'quantity', e.target.value)}
+                          className="w-28 rounded border border-slate-200 px-2 py-1 text-right text-sm tabular-nums focus:border-blue-500 focus:outline-none"
                         />
                       </td>
                       <td className="px-2 py-1.5">
                         <input
                           type="number"
                           step="0.01"
-                          value={c.quantity}
-                          onChange={(e) => handleClusterChange(c.id, 'quantity', e.target.value)}
-                          className="w-24 rounded border border-slate-200 px-2 py-1 text-right text-sm tabular-nums focus:border-blue-500 focus:outline-none"
+                          value={c.unitPrice}
+                          onChange={(e) => handleClusterChange(c.id, 'unitPrice', e.target.value)}
+                          className="w-28 rounded border border-slate-200 px-2 py-1 text-right text-sm tabular-nums focus:border-blue-500 focus:outline-none"
                         />
-                      </td>
-                      <td className="px-3 py-1.5 text-right font-medium text-slate-800 tabular-nums">
-                        {formatVND(amount)}
                       </td>
                       <td className="px-2 py-1.5">
                         <input
@@ -390,8 +463,11 @@ export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
                           className="w-20 rounded border border-slate-200 px-2 py-1 text-right text-sm tabular-nums focus:border-blue-500 focus:outline-none"
                         />
                       </td>
-                      <td className="px-3 py-1.5 text-right font-medium text-emerald-700 tabular-nums">
-                        {formatVND(bonus)}
+                      <td className="px-3 py-1.5 text-right font-semibold text-blue-700 tabular-nums">
+                        {formatVND(amount)} đ
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-semibold text-emerald-700 tabular-nums">
+                        {formatVND(bonus)} đ
                       </td>
                       <td className="px-2 py-1.5 text-center">
                         <button

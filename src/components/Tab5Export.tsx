@@ -1,10 +1,12 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { DatabaseBackup, FileSpreadsheet, Printer, RotateCcw, Upload } from 'lucide-react';
 import type { AppState, PayrollPeriod, SignatureConfig } from '../types/payroll';
 import type { PayrollCalculationResult } from '../utils/payrollCalc';
 import { downloadBlob, exportPayrollToExcel } from '../utils/excelExport';
+import { calculateTBTM, exportTbtmToExcel } from '../utils/tbtmCalc';
 import { normalizeAppState } from '../utils/periodOps';
 import { PrintPreview } from './PrintPreview';
+import { PrintPreviewTBTM } from './PrintPreviewTBTM';
 
 interface Tab5Props {
   state: AppState;
@@ -28,9 +30,12 @@ export const Tab5Export: React.FC<Tab5Props> = ({
   readOnly = false,
 }) => {
   const sig = state.signatures;
+  const [formMode, setFormMode] = useState<'NEW_26' | 'LEGACY_ND30'>('NEW_26');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const tbtmCalc = useMemo(() => calculateTBTM(period, calc), [period, calc]);
 
   const setSig = (field: keyof SignatureConfig, value: string) =>
     onUpdateSignatures({ ...sig, [field]: value });
@@ -39,8 +44,13 @@ export const Tab5Export: React.FC<Tab5Props> = ({
     setBusy(true);
     setMsg(null);
     try {
-      await exportPayrollToExcel(period, calc, sig);
-      setMsg({ type: 'ok', text: `Đã xuất Bảng thanh toán tiền lương ${period.label} (.xlsx).` });
+      if (formMode === 'NEW_26') {
+        await exportTbtmToExcel(period, tbtmCalc, sig);
+        setMsg({ type: 'ok', text: `Đã xuất Bảng chia lương Chuẩn Mới (26 công) ${period.label} (.xlsx).` });
+      } else {
+        await exportPayrollToExcel(period, calc, sig);
+        setMsg({ type: 'ok', text: `Đã xuất Bảng thanh toán tiền lương NĐ30 (Mẫu cũ 3 quỹ) ${period.label} (.xlsx).` });
+      }
     } catch (err) {
       console.error(err);
       setMsg({ type: 'err', text: 'Xuất Excel thất bại. Vui lòng thử lại.' });
@@ -202,12 +212,42 @@ export const Tab5Export: React.FC<Tab5Props> = ({
       </section>
 
       <section className="rounded-xl border border-slate-300 bg-slate-200/60 p-4 print:border-0 print:bg-white print:p-0">
-        <div className="no-print mb-2 text-xs font-semibold text-slate-600">
-          Bản xem trước in (A4 ngang) — {period.label}
+        <div className="no-print mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs font-semibold text-slate-700">
+            Bản xem trước in / PDF (A4 ngang) — {period.label}
+          </div>
+          <div className="flex items-center gap-1.5 rounded-lg bg-white p-1 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setFormMode('NEW_26')}
+              className={`rounded-md px-2.5 py-1 text-xs font-bold transition ${
+                formMode === 'NEW_26'
+                  ? 'bg-blue-700 text-white'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              Mẫu Mới 26 Công (T10/2026)
+            </button>
+            <button
+              type="button"
+              onClick={() => setFormMode('LEGACY_ND30')}
+              className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                formMode === 'LEGACY_ND30'
+                  ? 'bg-slate-700 text-white'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              Mẫu Cũ (Tách 3 quỹ)
+            </button>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <div className="mx-auto w-[277mm] bg-white p-[8mm] shadow-lg print:w-auto print:p-0 print:shadow-none">
-            <PrintPreview period={period} calc={calc} sig={sig} />
+            {formMode === 'NEW_26' ? (
+              <PrintPreviewTBTM period={period} tbtmCalc={tbtmCalc} sig={sig} />
+            ) : (
+              <PrintPreview period={period} calc={calc} sig={sig} />
+            )}
           </div>
         </div>
       </section>

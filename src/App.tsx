@@ -8,6 +8,7 @@ import {
   Cloud,
   CloudOff,
   CloudUpload,
+  Factory,
   FileSpreadsheet,
   FolderInput,
   KeyRound,
@@ -20,6 +21,7 @@ import {
   ShieldCheck,
   Trash2,
   Users,
+  Wrench,
 } from 'lucide-react';
 import type {
   AppState,
@@ -61,13 +63,15 @@ import {
   syncPeriodToCloud,
   syncSinglePinToCloud,
 } from './lib/supabase';
-import { exportPayrollToExcel } from './utils/excelExport';
 import { Tab1MonthlyHub } from './components/Tab1MonthlyHub';
 import { Tab2HR } from './components/Tab2HR';
 import { Tab3Payroll } from './components/Tab3Payroll';
 import { Tab4Analytics } from './components/Tab4Analytics';
 import { Tab5Export } from './components/Tab5Export';
 import { TabTbtmCompare } from './components/TabTbtmCompare';
+import { DEFAULT_OCT_2026_INPUTS, TabPxsx, type LineProductInput } from './components/TabPxsx';
+import { TabPxcd } from './components/TabPxcd';
+import { MASTER_TARIFFS_2026 } from './data/masterTariffs2026';
 import { PrintPreview } from './components/PrintPreview';
 import { PrintPreviewTBTM } from './components/PrintPreviewTBTM';
 import { calculateTBTM, exportTbtmToExcel } from './utils/tbtmCalc';
@@ -75,6 +79,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { ChangePinModal, SecurityAdminModal } from './components/SecurityModal';
 import { EmployeeSelfView } from './components/EmployeeSelfView';
 
+type DeptKey = 'PKTCN' | 'PXSX' | 'PXCD';
 type TabKey = 'tab1' | 'tab2' | 'tab3' | 'tab4' | 'tab5' | 'tab_tbtm';
 type CloudSyncStatus = 'offline' | 'connecting' | 'synced' | 'syncing' | 'empty_cloud' | 'error';
 
@@ -89,7 +94,11 @@ export function App() {
       return null;
     }
   });
-  const [activeTab, setActiveTab] = useState<TabKey>('tab3');
+  const [activeDept, setActiveDept] = useState<DeptKey>('PKTCN');
+  const [activeTab, setActiveTab] = useState<TabKey>('tab1');
+  const [sharedProductionItems, setSharedProductionItems] = useState<LineProductInput[]>(
+    () => DEFAULT_OCT_2026_INPUTS,
+  );
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const [newPeriodInput, setNewPeriodInput] = useState<string>('');
   const [showNewPeriodModal, setShowNewPeriodModal] = useState(false);
@@ -208,6 +217,10 @@ export function App() {
 
   // Luôn chạy engine tính toán trên toàn bộ 23 nhân sự để đơn giá & tiền lương chuẩn tuyệt đối
   const fullCalc = useMemo(() => calculatePayroll(activePeriod), [activePeriod]);
+  const tbtmSummary = useMemo(
+    () => calculateTBTM(activePeriod, fullCalc).summary,
+    [activePeriod, fullCalc],
+  );
 
   // Lọc kết quả hiển thị theo đúng cấp độ phân quyền (Strict Data Isolation)
   const visibleCalc = useMemo(() => {
@@ -950,21 +963,14 @@ export function App() {
               </button>
             )}
 
-            {activeTab === 'tab_tbtm' ? (
+            {activeDept === 'PKTCN' && (
               <button
                 type="button"
                 onClick={() => exportTbtmToExcel(activePeriod, calculateTBTM(activePeriod, fullCalc), state.signatures)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-500"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500"
+                title="Xuất Excel Bảng chia lương Chuẩn Mới 26 công"
               >
-                <FileSpreadsheet className="h-3.5 w-3.5" /> Xuất Excel TBTM
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => exportPayrollToExcel(activePeriod, visibleCalc, state.signatures)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
-              >
-                <FileSpreadsheet className="h-3.5 w-3.5" /> Xuất Excel NĐ30
+                <FileSpreadsheet className="h-3.5 w-3.5" /> Xuất Excel (26 công)
               </button>
             )}
 
@@ -996,8 +1002,55 @@ export function App() {
           </div>
         </div>
 
-        {/* Navigation Tabs (ẩn với Cấp 4 vì Cấp 4 có giao diện Phiếu lương cá nhân chuyên biệt) */}
-        {!perms.isSelfOnly && (
+        {/* 3 TAG BỘ PHẬN CHÍNH */}
+        {!perms.isSelfOnly && perms.canViewAllRoom && (
+          <div className="border-t border-slate-800 bg-slate-950/60">
+            <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-2 px-4 py-2">
+              <span className="mr-1 text-[11px] font-bold tracking-wider text-slate-400 uppercase">
+                Chọn Bộ phận:
+              </span>
+              <button
+                type="button"
+                onClick={() => setActiveDept('PKTCN')}
+                className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-bold transition ${
+                  activeDept === 'PKTCN'
+                    ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-400'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
+                }`}
+              >
+                <Building2 className="h-3.5 w-3.5" />
+                <span>1. P. Kỹ thuật - Công nghệ (P.KTCN)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveDept('PXSX')}
+                className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-bold transition ${
+                  activeDept === 'PXSX'
+                    ? 'bg-sky-600 text-white shadow-sm ring-1 ring-sky-400'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
+                }`}
+              >
+                <Factory className="h-3.5 w-3.5" />
+                <span>2. PX. Sản xuất (PXSX: DC1 – DC2 – TBTM)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveDept('PXCD')}
+                className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-bold transition ${
+                  activeDept === 'PXCD'
+                    ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-400'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
+                }`}
+              >
+                <Wrench className="h-3.5 w-3.5" />
+                <span>3. PX. Cơ điện - NL (PXCĐ-NL)</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Navigation Tabs của P.KTCN (chỉ hiện khi đang ở Tag 1: P.KTCN) */}
+        {!perms.isSelfOnly && activeDept === 'PKTCN' && (
           <div className="mx-auto max-w-[1600px] px-4">
             <nav className="flex gap-1 overflow-x-auto pt-1">
               {visibleTabs.map((t) => {
@@ -1139,53 +1192,55 @@ export function App() {
           </div>
         )}
 
-        {/* KPI Strip (Thông tin Quỹ chung minh bạch toàn phòng) */}
-        <div className="no-print mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
-            <div className="text-[11px] font-medium text-slate-500">Quỹ lương sản lượng khoán</div>
-            <div className="mt-1 text-base font-bold text-slate-900 tabular-nums">
-              {formatVND(summary.quyKhoan)} đ
+        {/* KPI Strip (chỉ hiển thị cho P.KTCN ở Tab 2-5; Tab 1 đã có Banner + 3 Card đồng bộ với PXSX & PXCĐ-NL) */}
+        {activeDept === 'PKTCN' && activeTab !== 'tab1' && (
+          <div className="no-print mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
+              <div className="text-[11px] font-medium text-slate-500">Quỹ lương sản lượng khoán</div>
+              <div className="mt-1 text-base font-bold text-slate-900 tabular-nums">
+                {formatVND(summary.quyKhoan)} đ
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
+              <div className="text-[11px] font-medium text-slate-500">Lương bảo dưỡng DC2</div>
+              <div className="mt-1 text-base font-bold text-slate-900 tabular-nums">
+                {formatVND(summary.quyBD)} đ
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
+              <div className="text-[11px] font-medium text-slate-500">
+                Chia thưởng {activePeriod.bonusSharePct}% / Giữ lại
+              </div>
+              <div className="mt-1 text-base font-bold text-emerald-700 tabular-nums">
+                {formatVND(summary.thuongChia)} đ
+              </div>
+            </div>
+            <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-3.5 shadow-sm">
+              <div className="text-[11px] font-semibold text-blue-700">
+                Tổng chia lương + thưởng
+              </div>
+              <div className="mt-1 text-base font-bold text-blue-900 tabular-nums">
+                {formatVND(tbtmSummary.tongChiQuy)} đ
+              </div>
+            </div>
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-3.5 shadow-sm">
+              <div className="text-[11px] font-semibold text-indigo-700">
+                Lương hệ số 1 (26 công)
+              </div>
+              <div className="mt-1 text-base font-bold text-indigo-900 tabular-nums">
+                {formatVND(tbtmSummary.luongHS1CoThuong)} đ
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
+              <div className="text-[11px] font-medium text-slate-500">
+                Tổng công / HS công (26c)
+              </div>
+              <div className="mt-1 text-base font-bold text-slate-900 tabular-nums">
+                {summary.tongCongKhoan.toFixed(2)} / {tbtmSummary.tongHSCongSP26.toFixed(3)}
+              </div>
             </div>
           </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
-            <div className="text-[11px] font-medium text-slate-500">Lương bảo dưỡng DC2</div>
-            <div className="mt-1 text-base font-bold text-slate-900 tabular-nums">
-              {formatVND(summary.quyBD)} đ
-            </div>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
-            <div className="text-[11px] font-medium text-slate-500">
-              Chia thưởng {activePeriod.bonusSharePct}% / Giữ lại
-            </div>
-            <div className="mt-1 text-base font-bold text-emerald-700 tabular-nums">
-              {formatVND(summary.thuongChia)} đ
-            </div>
-          </div>
-          <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-3.5 shadow-sm">
-            <div className="text-[11px] font-semibold text-blue-700">
-              Tổng chia lương + thưởng
-            </div>
-            <div className="mt-1 text-base font-bold text-blue-900 tabular-nums">
-              {formatVND(summary.quyThucChia)} đ
-            </div>
-          </div>
-          <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-3.5 shadow-sm">
-            <div className="text-[11px] font-semibold text-indigo-700">
-              Lương hệ số 1 ({activePeriod.standardDaysForHS1} công)
-            </div>
-            <div className="mt-1 text-base font-bold text-indigo-900 tabular-nums">
-              {formatVND(summary.luongHS1)} đ
-            </div>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
-            <div className="text-[11px] font-medium text-slate-500">
-              Tổng công khoán / HS ngày công
-            </div>
-            <div className="mt-1 text-base font-bold text-slate-900 tabular-nums">
-              {summary.tongCongKhoan.toFixed(2)} / {summary.tongHSNgayCong.toFixed(2)}
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* Giao diện theo Cấp phân quyền */}
         {perms.isSelfOnly ? (
@@ -1203,8 +1258,82 @@ export function App() {
               <PrintPreview period={activePeriod} calc={visibleCalc} sig={state.signatures} />
             </div>
           </>
+        ) : activeDept === 'PXSX' && perms.canViewAllRoom ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-xs text-sky-900">
+              <span className="font-bold text-sky-800">Thao tác hàng tháng (PXSX):</span>
+              <span>
+                <strong>Bước 1:</strong> Nhập <strong>Sản lượng m²</strong> từng loại gạch (DC1, DC2) &amp; <strong>Tiền khiếu nại</strong> ở tab Tổng hợp →
+              </span>
+              <span>
+                <strong>Bước 2:</strong> Chọn <strong>TBTM / DC1 / DC2</strong> để xem bảng chia lương chi tiết từng MSNV (26 / 26.5 công).
+              </span>
+            </div>
+            <TabPxsx
+              periodLabel={activePeriod.label}
+              sharedItems={sharedProductionItems}
+              onChangeSharedItems={setSharedProductionItems}
+            />
+          </div>
+        ) : activeDept === 'PXCD' && perms.canViewAllRoom ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs text-emerald-900">
+              <span className="font-bold text-emerald-800">Thao tác hàng tháng (PXCĐ-NL):</span>
+              <span>
+                <strong>Bước 1:</strong> Sản lượng m² DC1 &amp; DC2 đã tự đồng bộ từ bảng sản lượng chung → App tự tra đơn giá QĐ 01/KSX-2026 để tính Tổng quỹ lương 71 định biên.
+              </span>
+            </div>
+            <TabPxcd
+              periodLabel={activePeriod.label}
+              sharedItems={sharedProductionItems}
+              onChangeSharedItems={setSharedProductionItems}
+            />
+          </div>
         ) : (
           <>
+            {perms.canViewAllRoom && (
+              <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-xs text-blue-900">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold text-blue-800">Thao tác hàng tháng (P.KTCN):</span>
+                  <span>
+                    <strong>B1 (Tab 1):</strong> Nhập Sản lượng cụm, Bảo dưỡng DC2 &amp; Giảm trừ →
+                  </span>
+                  <span>
+                    <strong>B2 (Tab 2/3):</strong> Cập nhật Ngày công thực tế từng NV →
+                  </span>
+                  <span>
+                    <strong>B3 (Tab 3/5):</strong> Kiểm tra &amp; Xuất Excel / In PDF.
+                  </span>
+                </div>
+                {canEditActivePeriod && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const pktcnQuotas = MASTER_TARIFFS_2026.PKTCN.quotas;
+                      handleUpdatePeriod((prev) => ({
+                        ...prev,
+                        clusters: sharedProductionItems
+                          .filter((it) => !it.noBonus && it.qtyM2 > 0)
+                          .map((it) => ({
+                            id: `sync_${it.id}`,
+                            name: it.label,
+                            quantity: it.qtyM2,
+                            unitPrice:
+                              it.productCode === '60x60'
+                                ? 387
+                                : pktcnQuotas[it.productCode].unitPriceVND,
+                            bonusOutputPct: it.bonusSlPct,
+                            bonusQualityPct: it.bonusClPct,
+                          })),
+                      }));
+                    }}
+                    className="rounded-lg bg-blue-700 px-3 py-1 text-xs font-bold text-white shadow-sm hover:bg-blue-800"
+                  >
+                    Đồng bộ Sản lượng m² từ Bảng chung
+                  </button>
+                )}
+              </div>
+            )}
             <div className={activeTab === 'tab5' ? '' : 'no-print'}>
               {activeTab === 'tab1' && perms.canViewAllRoom && (
                 <Tab1MonthlyHub
@@ -1278,15 +1407,11 @@ export function App() {
 
             {activeTab !== 'tab5' && (
               <div className="hidden print:block">
-                {activeTab === 'tab_tbtm' ? (
-                  <PrintPreviewTBTM
-                    period={activePeriod}
-                    tbtmCalc={calculateTBTM(activePeriod, fullCalc)}
-                    sig={state.signatures}
-                  />
-                ) : (
-                  <PrintPreview period={activePeriod} calc={visibleCalc} sig={state.signatures} />
-                )}
+                <PrintPreviewTBTM
+                  period={activePeriod}
+                  tbtmCalc={calculateTBTM(activePeriod, fullCalc)}
+                  sig={state.signatures}
+                />
               </div>
             )}
           </>

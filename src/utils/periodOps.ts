@@ -141,13 +141,22 @@ export function normalizeAppState(raw: unknown): AppState {
   const keys = Object.keys(periods).sort();
   if (keys.length === 0) throw new Error('Không có kỳ lương hợp lệ');
 
+  const rawPolicies = Array.isArray(s.policies) ? s.policies : [];
+  const defaultPolicies = createInitialAppState().policies;
+  const mergedPolicies = [...rawPolicies];
+  for (const defPol of defaultPolicies) {
+    if (!mergedPolicies.some((p) => p.code === defPol.code || p.id === defPol.id)) {
+      mergedPolicies.unshift(defPol);
+    }
+  }
+
   return {
     schemaVersion: SCHEMA_VERSION,
     employees,
     periods,
     activePeriodKey:
       s.activePeriodKey && periods[s.activePeriodKey] ? s.activePeriodKey : keys[keys.length - 1],
-    policies: Array.isArray(s.policies) ? s.policies : [],
+    policies: mergedPolicies,
     hrChangeLog: Array.isArray(s.hrChangeLog) ? s.hrChangeLog : [],
     signatures: { ...DEFAULT_SIGNATURES, ...(s.signatures ?? {}) },
     authAccounts,

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import type { AttendanceRecord, PayrollPeriod } from '../types/payroll';
 import { formatDecimal, formatVND } from '../utils/payrollCalc';
@@ -7,6 +7,7 @@ import type {
   DepartmentSubtotal,
   PayrollCalculationResult,
 } from '../utils/payrollCalc';
+import { calculateTBTM } from '../utils/tbtmCalc';
 import { parseNumberLoose } from '../utils/importParsers';
 
 type EditableField = 'congKhoan' | 'congBD' | 'truThuongCaNhan';
@@ -71,7 +72,9 @@ export const Tab3Payroll: React.FC<Tab3Props> = ({
   readOnly = false,
   scopeBadge,
 }) => {
+  const [viewMode, setViewMode] = useState<'NEW_26' | 'LEGACY'>('NEW_26');
   const { summary: s, vanPhongRows, dayChuyenRows, subVanPhong, subDayChuyen, grandTotal } = calc;
+  const tbtm = useMemo(() => calculateTBTM(period, calc), [period, calc]);
   const isA = period.calculationMode === 'A';
   const orderedMsnv = calc.rows.map((r) => r.msnv);
 
@@ -225,8 +228,228 @@ export const Tab3Payroll: React.FC<Tab3Props> = ({
 
   return (
     <div className="space-y-5">
-      {/* Bảng tổng hợp quỹ + điều khiển */}
-      <section className="grid gap-4 lg:grid-cols-3">
+      {/* Thanh chuyển nhanh giữa Cách tính Mới (26 công) và Mẫu Cũ */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-white px-4 py-3 shadow-sm">
+        <div>
+          <div className="text-sm font-bold text-slate-900">
+            Phương án tính lương P.KTCN — {period.label}
+          </div>
+          <div className="text-xs text-slate-500">
+            {viewMode === 'NEW_26'
+              ? 'Đang hiển thị Cách tính Mới (26 công, gộp Quỹ khoán + Bảo dưỡng DC2 = 298.611.759 đ, Khối QL cấp phòng giữ nguyên HS khi công >= 26).'
+              : 'Đang hiển thị Mẫu cũ (Chế độ 1 / Chế độ 2 tách 3 quỹ).'}
+          </div>
+        </div>
+        <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+          <button
+            type="button"
+            className={toggleBtn(viewMode === 'NEW_26')}
+            onClick={() => setViewMode('NEW_26')}
+          >
+            Chuẩn Mới 26 Công (T10/2026)
+          </button>
+          <button
+            type="button"
+            className={toggleBtn(viewMode === 'LEGACY')}
+            onClick={() => setViewMode('LEGACY')}
+          >
+            Mẫu Cũ (CĐ1 / CĐ2)
+          </button>
+        </div>
+      </div>
+
+      {viewMode === 'NEW_26' ? (
+        <>
+          <section className="grid gap-4 lg:grid-cols-3">
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2">
+              <h2 className="mb-3 text-base font-bold text-slate-900">
+                Bảng tổng hợp Quỹ lương Chuẩn Mới (26 công) — {period.label}
+              </h2>
+              <div className="grid gap-x-8 sm:grid-cols-2">
+                {[
+                  ['Tổng quỹ lương PKTCN theo sản lượng khoán', tbtm.summary.quyLuongSP, 'font-bold'],
+                  ['Tổng thưởng (sau giảm trừ)', tbtm.summary.tongThuong, ''],
+                  [`Chi thưởng ${period.bonusSharePct}%`, tbtm.summary.thuongChia50, 'text-emerald-700 font-semibold'],
+                  [`Tổng chi quỹ lương + thưởng`, tbtm.summary.tongChiQuy, 'font-bold text-blue-800'],
+                  [`Quỹ dự phòng ${100 - period.bonusSharePct}%`, tbtm.summary.quyDuPhong50, 'text-amber-700'],
+                  ['Tổng hệ số công tính lương (26 công)', tbtm.summary.tongHSCongSP26, 'font-bold', true],
+                ].map(([label, value, cls, isDec]) => (
+                  <div key={String(label)} className="flex justify-between border-b border-dashed border-slate-100 py-1.5 text-sm">
+                    <span className="text-slate-600">{String(label)}</span>
+                    <span className={`tabular-nums ${String(cls ?? 'font-semibold text-slate-900')}`}>
+                      {isDec ? formatDecimal(Number(value), 3) : `${formatVND(Number(value))} đ`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col justify-between rounded-xl border border-indigo-200 bg-indigo-50/70 p-5 shadow-sm">
+              <div>
+                <div className="text-xs font-semibold text-indigo-700 uppercase">Lương hệ số 1 (26 công)</div>
+                <div className="mt-1 text-2xl font-extrabold text-indigo-900 tabular-nums">
+                  {formatVND(tbtm.summary.luongHS1CoThuong)} đ
+                </div>
+                <div className="mt-2 space-y-1 text-xs text-indigo-800">
+                  <div>ĐG Lương SP / HS1: <strong>{formatVND(tbtm.summary.donGiaLuongSP)} đ</strong></div>
+                  <div>ĐG Thưởng / HS1: <strong>{formatVND(tbtm.summary.donGiaThuong)} đ</strong></div>
+                </div>
+              </div>
+              <div className="mt-3 flex items-center gap-1.5 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-medium text-emerald-900">
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-700" />
+                <span>Khớp chuẩn PDF P.KTCN (43.329 HS công)</span>
+              </div>
+            </div>
+          </section>
+
+          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Bảng lương chi tiết Chuẩn Mới 26 công ({tbtm.rows.length} nhân sự)
+                </h3>
+                {scopeBadge && <p className="text-[11px] font-medium text-blue-700">{scopeBadge}</p>}
+              </div>
+              {!readOnly && (
+                <span className="text-[11px] text-slate-500">
+                  Sửa trực tiếp cột Công thực tế — hoặc dán nhiều dòng từ Excel
+                </span>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-800 text-[11px] text-white">
+                  <tr>
+                    <th className="px-2 py-2 text-center">STT</th>
+                    <th className="px-2 py-2 text-center">MSNV</th>
+                    <th className="px-2 py-2 text-left">Họ và tên</th>
+                    <th className="px-2 py-2 text-left">Chức vụ</th>
+                    <th className="px-2 py-2 text-right">HS Lương</th>
+                    <th className="px-2 py-2 text-right">HS TN</th>
+                    <th className="px-2 py-2 text-right">HS Tổng</th>
+                    <th className="px-2 py-2 text-right">Công thực tế</th>
+                    <th className="px-2 py-2 text-right">HS công tính lương</th>
+                    <th className="px-2 py-2 text-right">Lương sản phẩm</th>
+                    <th className="px-2 py-2 text-right">Thưởng CL+SL</th>
+                    <th className="px-2 py-2 text-right">Tổng lương + thưởng</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  <tr className="bg-blue-50/70">
+                    <td colSpan={12} className="px-3 py-1.5 text-xs font-bold text-blue-900">
+                      I. VĂN PHÒNG ({tbtm.vanPhongRows.length} người)
+                    </td>
+                  </tr>
+                  {tbtm.vanPhongRows.map((r) => (
+                    <tr key={r.msnv} className="hover:bg-blue-50/40">
+                      <td className="px-2 py-1 text-center text-slate-500">{r.stt}</td>
+                      <td className="px-2 py-1 text-center font-mono text-slate-600">{r.msnv}</td>
+                      <td className="px-2 py-1 font-medium text-slate-900 whitespace-nowrap">{r.fullName}</td>
+                      <td className="px-2 py-1 text-slate-600 whitespace-nowrap">{r.position}</td>
+                      <td className="px-2 py-1 text-right tabular-nums">{formatDecimal(r.hsCV)}</td>
+                      <td className="px-2 py-1 text-right tabular-nums">{formatDecimal(r.hsTN)}</td>
+                      <td className="px-2 py-1 text-right font-semibold tabular-nums">{formatDecimal(r.hsTong)}</td>
+                      <td className="px-1 py-1 text-right">
+                        {readOnly ? (
+                          <span className="px-1.5 tabular-nums">{formatDecimal(r.congSP, 3)}</span>
+                        ) : (
+                          <NumberCell
+                            value={r.congSP}
+                            width="w-20"
+                            onCommit={(v) => updateRecord(r.msnv, 'congKhoan', v)}
+                            onPasteColumn={(vals) => pasteColumn(r.msnv, 'congKhoan', vals)}
+                          />
+                        )}
+                      </td>
+                      <td className="px-2 py-1 text-right font-semibold text-blue-700 tabular-nums">
+                        {formatDecimal(r.hsCongSP26, 3)}
+                      </td>
+                      <td className="px-2 py-1 text-right tabular-nums">{formatVND(r.luongSPHienThi)}</td>
+                      <td className="px-2 py-1 text-right tabular-nums text-emerald-700">{formatVND(r.tienThuongHienThi)}</td>
+                      <td className="px-2 py-1 text-right font-bold text-slate-900 tabular-nums">
+                        {formatVND(r.tongLuongTBTMHienThi)}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="bg-slate-100 font-bold text-slate-900">
+                    <td colSpan={4} className="px-2 py-1.5">Cộng I. Văn phòng</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatDecimal(tbtm.subVanPhong.hsCV)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatDecimal(tbtm.subVanPhong.hsTN)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatDecimal(tbtm.subVanPhong.hsTong)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatDecimal(tbtm.subVanPhong.congSP, 3)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatDecimal(tbtm.subVanPhong.hsCongSP26, 3)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatVND(tbtm.subVanPhong.luongSP)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatVND(tbtm.subVanPhong.tienThuong)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatVND(tbtm.subVanPhong.tongLuongTBTM)}</td>
+                  </tr>
+
+                  <tr className="bg-emerald-50/70">
+                    <td colSpan={12} className="px-3 py-1.5 text-xs font-bold text-emerald-900">
+                      II. BP NHÂN VIÊN ({tbtm.dayChuyenRows.length} người)
+                    </td>
+                  </tr>
+                  {tbtm.dayChuyenRows.map((r) => (
+                    <tr key={r.msnv} className="hover:bg-blue-50/40">
+                      <td className="px-2 py-1 text-center text-slate-500">{r.stt}</td>
+                      <td className="px-2 py-1 text-center font-mono text-slate-600">{r.msnv}</td>
+                      <td className="px-2 py-1 font-medium text-slate-900 whitespace-nowrap">{r.fullName}</td>
+                      <td className="px-2 py-1 text-slate-600 whitespace-nowrap">{r.position}</td>
+                      <td className="px-2 py-1 text-right tabular-nums">{formatDecimal(r.hsCV)}</td>
+                      <td className="px-2 py-1 text-right tabular-nums">{formatDecimal(r.hsTN)}</td>
+                      <td className="px-2 py-1 text-right font-semibold tabular-nums">{formatDecimal(r.hsTong)}</td>
+                      <td className="px-1 py-1 text-right">
+                        {readOnly ? (
+                          <span className="px-1.5 tabular-nums">{formatDecimal(r.congSP, 3)}</span>
+                        ) : (
+                          <NumberCell
+                            value={r.congSP}
+                            width="w-20"
+                            onCommit={(v) => updateRecord(r.msnv, 'congKhoan', v)}
+                            onPasteColumn={(vals) => pasteColumn(r.msnv, 'congKhoan', vals)}
+                          />
+                        )}
+                      </td>
+                      <td className="px-2 py-1 text-right font-semibold text-blue-700 tabular-nums">
+                        {formatDecimal(r.hsCongSP26, 3)}
+                      </td>
+                      <td className="px-2 py-1 text-right tabular-nums">{formatVND(r.luongSPHienThi)}</td>
+                      <td className="px-2 py-1 text-right tabular-nums text-emerald-700">{formatVND(r.tienThuongHienThi)}</td>
+                      <td className="px-2 py-1 text-right font-bold text-slate-900 tabular-nums">
+                        {formatVND(r.tongLuongTBTMHienThi)}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="bg-slate-100 font-bold text-slate-900">
+                    <td colSpan={4} className="px-2 py-1.5">Cộng II. BP nhân viên</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatDecimal(tbtm.subDayChuyen.hsCV)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatDecimal(tbtm.subDayChuyen.hsTN)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatDecimal(tbtm.subDayChuyen.hsTong)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatDecimal(tbtm.subDayChuyen.congSP, 3)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatDecimal(tbtm.subDayChuyen.hsCongSP26, 3)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatVND(tbtm.subDayChuyen.luongSP)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatVND(tbtm.subDayChuyen.tienThuong)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatVND(tbtm.subDayChuyen.tongLuongTBTM)}</td>
+                  </tr>
+
+                  <tr className="bg-blue-900 font-bold text-white">
+                    <td colSpan={4} className="px-2 py-2">TỔNG CỘNG PHÒNG KTCN</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{formatDecimal(tbtm.grandTotal.hsCV)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{formatDecimal(tbtm.grandTotal.hsTN)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{formatDecimal(tbtm.grandTotal.hsTong)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{formatDecimal(tbtm.grandTotal.congSP, 3)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{formatDecimal(tbtm.grandTotal.hsCongSP26, 3)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{formatVND(tbtm.grandTotal.luongSP)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{formatVND(tbtm.grandTotal.tienThuong)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{formatVND(tbtm.grandTotal.tongLuongTBTM)} đ</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      ) : (
+        <>
+          <section className="grid gap-4 lg:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2">
           <h2 className="mb-3 text-base font-bold text-slate-900">
             Bảng tổng hợp Quỹ lương — {period.label}
@@ -412,6 +635,8 @@ export const Tab3Payroll: React.FC<Tab3Props> = ({
           </p>
         )}
       </section>
+        </>
+      )}
     </div>
   );
 };
