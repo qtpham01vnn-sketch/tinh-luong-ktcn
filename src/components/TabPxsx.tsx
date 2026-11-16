@@ -163,8 +163,9 @@ export const TabPxsx: React.FC<{
   periodLabel: string;
   sharedItems?: LineProductInput[];
   onChangeSharedItems?: React.Dispatch<React.SetStateAction<LineProductInput[]>>;
-}> = ({ periodLabel, sharedItems, onChangeSharedItems }) => {
-  const [subView, setSubView] = useState<'OVERVIEW' | PxsxDeptKey>('OVERVIEW');
+  allowedDept?: PxsxDeptKey;
+}> = ({ periodLabel, sharedItems, onChangeSharedItems, allowedDept }) => {
+  const [subView, setSubView] = useState<'OVERVIEW' | PxsxDeptKey>(allowedDept ?? 'OVERVIEW');
   const [searchQuery, setSearchQuery] = useState('');
   const [groupFilter, setGroupFilter] = useState('ALL');
   const [localItems, setLocalItems] = useState<LineProductInput[]>(DEFAULT_OCT_2026_INPUTS);
@@ -572,47 +573,57 @@ export const TabPxsx: React.FC<{
             <div className="flex items-center gap-2">
               <Factory className="h-5 w-5 text-amber-400" />
               <h2 className="text-lg font-bold">
-                Phân xưởng Sản xuất (PXSX): DC1 – DC2 – TBTM ({periodLabel})
+                {allowedDept
+                  ? `Phân xưởng Sản xuất (PXSX) — Bộ phận ${allowedDept} (${periodLabel})`
+                  : `Phân xưởng Sản xuất (PXSX): DC1 – DC2 – TBTM (${periodLabel})`}
               </h2>
             </div>
             <p className="mt-1 text-xs text-blue-200">
-              Tính toán theo Quyết định 01/KSX-2026/PNC-QĐ (01/04/2026) &amp; Bảng chia lương T10/2026 đã duyệt
+              {allowedDept
+                ? `Phạm vi phân quyền: Chỉ xem bảng lương chi tiết Bộ phận ${allowedDept}.`
+                : 'Tính toán theo Quyết định 01/KSX-2026/PNC-QĐ (01/04/2026) & Bảng chia lương T10/2026 đã duyệt'}
             </p>
           </div>
           <div className="rounded-lg bg-white/10 px-4 py-2 text-right backdrop-blur-sm">
-            <div className="text-[11px] text-blue-200 uppercase">Tổng Lương + Thưởng PXSX</div>
-            <div className="text-xl font-extrabold text-amber-300">{formatVND(calc.grandTotal)} đ</div>
+            <div className="text-[11px] text-blue-200 uppercase">
+              {allowedDept ? `Tổng Lương + Thưởng ${allowedDept}` : 'Tổng Lương + Thưởng PXSX'}
+            </div>
+            <div className="text-xl font-extrabold text-amber-300">
+              {formatVND(allowedDept && deptView ? deptView.totals.totalPay : calc.grandTotal)} đ
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Sub-view Navigation */}
-      <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-        {(
-          [
-            { key: 'OVERVIEW', label: 'Tổng hợp Quỹ PXSX' },
-            { key: 'TBTM', label: `Chi tiết TBTM (${stdDaysByDept.TBTM} công, ${bonusShareByDept.TBTM}% thưởng)` },
-            { key: 'DC1', label: `Chi tiết DC1 (${stdDaysByDept.DC1} công, ${bonusShareByDept.DC1}% thưởng)` },
-            { key: 'DC2', label: `Chi tiết DC2 (${stdDaysByDept.DC2} công, ${bonusShareByDept.DC2}% thưởng)` },
-          ] as const
-        ).map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => {
-              setSubView(tab.key);
-              setGroupFilter('ALL');
-              setSearchQuery('');
-            }}
-            className={`rounded-lg px-3.5 py-2 text-xs font-semibold transition ${
-              subView === tab.key
-                ? 'bg-blue-700 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      {/* Sub-view Navigation (ẩn khi bị khóa phạm vi 1 bộ phận) */}
+      {!allowedDept && (
+        <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+          {(
+            [
+              { key: 'OVERVIEW', label: 'Tổng hợp Quỹ PXSX' },
+              { key: 'TBTM', label: `Chi tiết TBTM (${stdDaysByDept.TBTM} công, ${bonusShareByDept.TBTM}% thưởng)` },
+              { key: 'DC1', label: `Chi tiết DC1 (${stdDaysByDept.DC1} công, ${bonusShareByDept.DC1}% thưởng)` },
+              { key: 'DC2', label: `Chi tiết DC2 (${stdDaysByDept.DC2} công, ${bonusShareByDept.DC2}% thưởng)` },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => {
+                setSubView(tab.key);
+                setGroupFilter('ALL');
+                setSearchQuery('');
+              }}
+              className={`rounded-lg px-3.5 py-2 text-xs font-semibold transition ${
+                subView === tab.key
+                  ? 'bg-blue-700 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {subView !== 'OVERVIEW' && deptView ? (
         <div className="space-y-4">

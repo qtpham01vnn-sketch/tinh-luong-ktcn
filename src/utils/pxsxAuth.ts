@@ -1,9 +1,32 @@
-import { PXSX_EMPLOYEES_OCT_2026 } from '../data/pxsxOctober2026';
+import { PXSX_EMPLOYEES_OCT_2026, type PxsxDeptKey } from '../data/pxsxOctober2026';
 import type { AuthAccount, EmployeeMaster } from '../types/payroll';
 import { normalizeMsnv4, sha256Hex } from './rbacAuth';
 
-/** Quản đốc & Thống kê PXSX được phép xem & thao tác toàn bộ tab PXSX */
-export const PXSX_MANAGER_MSNVS = new Set(['0589', '0931', '1711', '1884']);
+export type PxsxUserScope =
+  | { kind: 'ALL' }
+  | { kind: 'DEPT'; dept: PxsxDeptKey }
+  | { kind: 'SELF' };
+
+const PXSX_DEPT_SCOPE_MAP: Record<string, PxsxDeptKey> = {
+  '0384': 'TBTM', // Trần Văn Chung - Đốc công TBTM
+  '1884': 'TBTM', // Nguyễn Thị Thanh Thảo - Thống kê TBTM
+  '0536': 'DC1',  // Nguyễn Minh Hồng - Đốc công HC DC1
+  '1711': 'DC1',  // Ngũ Thị Mỹ Duyên - Thống kê DC1
+  '0498': 'DC2',  // Lê Anh Tuấn - Đốc công DC2
+  '0931': 'DC2',  // Phạm Thị Mỹ Hằng - Thống kê DC2
+};
+
+/** Xác định phạm vi xem lương PXSX theo MSNV */
+export function getPxsxUserScope(msnv: string): PxsxUserScope {
+  const norm = normalizeMsnv4(msnv);
+  if (norm === '0589') return { kind: 'ALL' }; // Quản đốc PXSX: xem toàn bộ
+  const dept = PXSX_DEPT_SCOPE_MAP[norm];
+  if (dept) return { kind: 'DEPT', dept };
+  return { kind: 'SELF' };
+}
+
+/** Quản đốc, Đốc công & Thống kê PXSX được phép vào giao diện bảng lương bộ phận */
+export const PXSX_MANAGER_MSNVS = new Set(['0589', ...Object.keys(PXSX_DEPT_SCOPE_MAP)]);
 
 const PXSX_AUTH_STORAGE_KEY = 'pxsx_auth_accounts_v1';
 

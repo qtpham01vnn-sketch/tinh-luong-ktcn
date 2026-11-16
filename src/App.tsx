@@ -82,7 +82,7 @@ import { PxsxSelfView } from './components/PxsxSelfView';
 import {
   buildPxsxAuthAccounts,
   buildPxsxEmployeeDirectory,
-  PXSX_MANAGER_MSNVS,
+  getPxsxUserScope,
   saveStoredPxsxAuthAccounts,
 } from './utils/pxsxAuth';
 
@@ -222,8 +222,8 @@ export function App() {
     return acc;
   }, [isPxsxSession, pxsxAuthAccounts, authAccounts, currentEmployee]);
 
-  const isPxsxManager =
-    isPxsxSession && currentEmployee ? PXSX_MANAGER_MSNVS.has(normalizeMsnv4(currentEmployee.msnv)) : false;
+  const pxsxScope =
+    isPxsxSession && currentEmployee ? getPxsxUserScope(currentEmployee.msnv) : null;
 
   const perms = useMemo(
     () => (currentAccount ? getRolePermissions(currentAccount) : null),
@@ -1305,27 +1305,30 @@ export function App() {
         )}
 
         {/* Giao diện theo Cấp phân quyền */}
-        {isPxsxSession && !isPxsxManager ? (
+        {pxsxScope?.kind === 'SELF' ? (
           <PxsxSelfView
             employee={currentEmployee}
             periodLabel={activePeriod.label}
             sharedItems={sharedProductionItems}
           />
-        ) : isPxsxSession && isPxsxManager ? (
+        ) : pxsxScope ? (
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-xs text-sky-900">
-              <span className="font-bold text-sky-800">Thao tác hàng tháng (PXSX):</span>
-              <span>
-                <strong>Bước 1:</strong> Nhập <strong>Sản lượng m²</strong> từng loại gạch (DC1, DC2) &amp; <strong>Tiền khiếu nại</strong> ở tab Tổng hợp →
-              </span>
-              <span>
-                <strong>Bước 2:</strong> Chọn <strong>TBTM / DC1 / DC2</strong> để xem bảng chia lương chi tiết từng MSNV.
-              </span>
-            </div>
+            {pxsxScope.kind === 'ALL' && (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-xs text-sky-900">
+                <span className="font-bold text-sky-800">Thao tác hàng tháng (PXSX):</span>
+                <span>
+                  <strong>Bước 1:</strong> Nhập <strong>Sản lượng m²</strong> từng loại gạch (DC1, DC2) &amp; <strong>Tiền khiếu nại</strong> ở tab Tổng hợp →
+                </span>
+                <span>
+                  <strong>Bước 2:</strong> Chọn <strong>TBTM / DC1 / DC2</strong> để xem bảng chia lương chi tiết từng MSNV.
+                </span>
+              </div>
+            )}
             <TabPxsx
               periodLabel={activePeriod.label}
               sharedItems={sharedProductionItems}
               onChangeSharedItems={setSharedProductionItems}
+              allowedDept={pxsxScope.kind === 'DEPT' ? pxsxScope.dept : undefined}
             />
           </div>
         ) : perms.isSelfOnly ? (
