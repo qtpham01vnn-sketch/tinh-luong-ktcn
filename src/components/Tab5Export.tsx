@@ -3,7 +3,7 @@ import { DatabaseBackup, FileSpreadsheet, Printer, RotateCcw, Upload } from 'luc
 import type { AppState, PayrollPeriod, SignatureConfig } from '../types/payroll';
 import type { PayrollCalculationResult } from '../utils/payrollCalc';
 import { downloadBlob, exportPayrollToExcel } from '../utils/excelExport';
-import { calculateTBTM, exportTbtmToExcel } from '../utils/tbtmCalc';
+import { calculateTBTM, exportTbtmToExcel, filterTbtmResult } from '../utils/tbtmCalc';
 import { normalizeAppState } from '../utils/periodOps';
 import { PrintPreview } from './PrintPreview';
 import { PrintPreviewTBTM } from './PrintPreviewTBTM';
@@ -12,6 +12,7 @@ interface Tab5Props {
   state: AppState;
   period: PayrollPeriod;
   calc: PayrollCalculationResult;
+  fullCalc?: PayrollCalculationResult;
   onUpdateSignatures: (sig: SignatureConfig) => void;
   onRestore: (state: AppState) => void;
   onResetSample: () => void;
@@ -24,6 +25,7 @@ export const Tab5Export: React.FC<Tab5Props> = ({
   state,
   period,
   calc,
+  fullCalc,
   onUpdateSignatures,
   onRestore,
   onResetSample,
@@ -35,7 +37,11 @@ export const Tab5Export: React.FC<Tab5Props> = ({
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const tbtmCalc = useMemo(() => calculateTBTM(period, calc), [period, calc]);
+  const tbtmCalc = useMemo(() => {
+    const base = calculateTBTM(period, fullCalc ?? calc);
+    if (!fullCalc || fullCalc === calc) return base;
+    return filterTbtmResult(base, new Set(calc.rows.map((r) => r.msnv)));
+  }, [period, calc, fullCalc]);
 
   const setSig = (field: keyof SignatureConfig, value: string) =>
     onUpdateSignatures({ ...sig, [field]: value });

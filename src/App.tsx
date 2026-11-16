@@ -1363,6 +1363,7 @@ export function App() {
                 <Tab3Payroll
                   period={activePeriod}
                   calc={visibleCalc}
+                  fullCalc={fullCalc}
                   onUpdatePeriod={handleUpdatePeriod}
                   readOnly={!canEditActivePeriod}
                   scopeBadge={perms.scopeTitle}
@@ -1383,6 +1384,7 @@ export function App() {
                   state={state}
                   period={activePeriod}
                   calc={visibleCalc}
+                  fullCalc={fullCalc}
                   onUpdateSignatures={handleUpdateSignatures}
                   onRestore={(restored) => {
                     if (perms.canEdit) {

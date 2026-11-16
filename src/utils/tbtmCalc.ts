@@ -198,6 +198,42 @@ export function calculateTBTM(
   };
 }
 
+/** Lọc kết quả TBTM theo danh sách MSNV được phép xem, giữ nguyên đơn giá HS1 toàn phòng */
+export function filterTbtmResult(
+  full: TbtmCalculationResult,
+  visibleMsnvs: Set<string>,
+): TbtmCalculationResult {
+  if (visibleMsnvs.size === full.rows.length) return full;
+  const rows = full.rows
+    .filter((r) => visibleMsnvs.has(r.msnv))
+    .map((r, idx) => ({ ...r, stt: idx + 1 }));
+  const vanPhongRows = rows.filter((r) => r.department === 'van_phong');
+  const dayChuyenRows = rows.filter((r) => r.department === 'day_chuyen');
+  const makeSubtotal = (label: string, list: TbtmEmployeeRow[]): TbtmDepartmentSubtotal => ({
+    label,
+    count: list.length,
+    hsCV: list.reduce((s, r) => s + r.hsCV, 0),
+    hsTN: list.reduce((s, r) => s + r.hsTN, 0),
+    hsTong: list.reduce((s, r) => s + r.hsTong, 0),
+    congSP: list.reduce((s, r) => s + r.congSP, 0),
+    hsCongSP26: list.reduce((s, r) => s + r.hsCongSP26, 0),
+    luongSP: list.reduce((s, r) => s + r.luongSP, 0),
+    tienThuong: list.reduce((s, r) => s + r.tienThuong, 0),
+    tongLuongTBTM: list.reduce((s, r) => s + r.tongLuongTBTM, 0),
+    tongLuongCu: list.reduce((s, r) => s + r.tongLuongCu, 0),
+    chenhLech: list.reduce((s, r) => s + r.chenhLech, 0),
+  });
+  return {
+    summary: full.summary,
+    rows,
+    vanPhongRows,
+    dayChuyenRows,
+    subVanPhong: makeSubtotal('I. VĂN PHÒNG', vanPhongRows),
+    subDayChuyen: makeSubtotal('II. BP nhân viên', dayChuyenRows),
+    grandTotal: makeSubtotal('Tổng cộng', rows),
+  };
+}
+
 /**
  * Xuất file Excel chuẩn mẫu sheet TBTM của Công ty CP Gạch Men Phương Nam
  */

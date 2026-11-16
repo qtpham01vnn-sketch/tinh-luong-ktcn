@@ -7,7 +7,7 @@ import type {
   DepartmentSubtotal,
   PayrollCalculationResult,
 } from '../utils/payrollCalc';
-import { calculateTBTM } from '../utils/tbtmCalc';
+import { calculateTBTM, filterTbtmResult } from '../utils/tbtmCalc';
 import { parseNumberLoose } from '../utils/importParsers';
 
 type EditableField = 'congKhoan' | 'congBD' | 'truThuongCaNhan';
@@ -40,6 +40,7 @@ const filterByQuery = <T extends { msnv: string; fullName: string; position: str
 interface Tab3Props {
   period: PayrollPeriod;
   calc: PayrollCalculationResult;
+  fullCalc?: PayrollCalculationResult;
   onUpdatePeriod: (updater: (prev: PayrollPeriod) => PayrollPeriod) => void;
   readOnly?: boolean;
   scopeBadge?: string;
@@ -93,6 +94,7 @@ const NumberCell: React.FC<{
 export const Tab3Payroll: React.FC<Tab3Props> = ({
   period,
   calc,
+  fullCalc,
   onUpdatePeriod,
   readOnly = false,
   scopeBadge,
@@ -101,7 +103,11 @@ export const Tab3Payroll: React.FC<Tab3Props> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [deptFilter, setDeptFilter] = useState<'ALL' | 'VP' | 'DC'>('ALL');
   const { summary: s, vanPhongRows, dayChuyenRows, subVanPhong, subDayChuyen, grandTotal } = calc;
-  const tbtm = useMemo(() => calculateTBTM(period, calc), [period, calc]);
+  const tbtm = useMemo(() => {
+    const base = calculateTBTM(period, fullCalc ?? calc);
+    if (!fullCalc || fullCalc === calc) return base;
+    return filterTbtmResult(base, new Set(calc.rows.map((r) => r.msnv)));
+  }, [period, calc, fullCalc]);
   const isA = period.calculationMode === 'A';
   const orderedMsnv = calc.rows.map((r) => r.msnv);
 
