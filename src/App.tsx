@@ -75,15 +75,23 @@ import { MASTER_TARIFFS_2026 } from './data/masterTariffs2026';
 import { PrintPreview } from './components/PrintPreview';
 import { PrintPreviewTBTM } from './components/PrintPreviewTBTM';
 import { calculateTBTM, exportTbtmToExcel } from './utils/tbtmCalc';
-import { LoginScreen } from './components/LoginScreen';
+import { LoginScreen, type LoginDeptKey } from './components/LoginScreen';
 import { ChangePinModal, SecurityAdminModal } from './components/SecurityModal';
 import { EmployeeSelfView } from './components/EmployeeSelfView';
+import { PxsxSelfView } from './components/PxsxSelfView';
+import {
+  buildPxsxAuthAccounts,
+  buildPxsxEmployeeDirectory,
+  PXSX_MANAGER_MSNVS,
+  saveStoredPxsxAuthAccounts,
+} from './utils/pxsxAuth';
 
 type DeptKey = 'PKTCN' | 'PXSX' | 'PXCD';
 type TabKey = 'tab1' | 'tab2' | 'tab3' | 'tab4' | 'tab5' | 'tab_tbtm';
 type CloudSyncStatus = 'offline' | 'connecting' | 'synced' | 'syncing' | 'empty_cloud' | 'error';
 
 const SESSION_STORAGE_KEY = 'ktcn_payroll_session_msnv_v1';
+const SESSION_DEPT_KEY = 'ktcn_payroll_session_dept_v1';
 
 export function App() {
   const [state, setState] = useState<AppState>(() => loadState());
@@ -94,7 +102,16 @@ export function App() {
       return null;
     }
   });
-  const [activeDept, setActiveDept] = useState<DeptKey>('PKTCN');
+  const [loggedInDept, setLoggedInDept] = useState<LoginDeptKey>(() => {
+    try {
+      return sessionStorage.getItem(SESSION_DEPT_KEY) === 'PXSX' ? 'PXSX' : 'PKTCN';
+    } catch {
+      return 'PKTCN';
+    }
+  });
+  const [activeDept, setActiveDept] = useState<DeptKey>(() =>
+    loggedInDept === 'PXSX' ? 'PXSX' : 'PKTCN',
+  );
   const [activeTab, setActiveTab] = useState<TabKey>('tab1');
   const [sharedProductionItems, setSharedProductionItems] = useState<LineProductInput[]>(
     () => DEFAULT_OCT_2026_INPUTS,
@@ -183,18 +200,30 @@ export function App() {
     [state.employees, state.authAccounts],
   );
 
+  const pxsxEmployees = useMemo(() => buildPxsxEmployeeDirectory(), []);
+  const [pxsxAuthAccounts, setPxsxAuthAccounts] = useState<Record<string, AuthAccount>>(() =>
+    buildPxsxAuthAccounts(buildPxsxEmployeeDirectory()),
+  );
+
+  const isPxsxSession = loggedInDept === 'PXSX';
+
   const currentEmployee = useMemo(() => {
     if (!loggedInMsnv) return undefined;
     const norm = normalizeMsnv4(loggedInMsnv);
-    return state.employees.find((e) => normalizeMsnv4(e.msnv) === norm && e.active);
-  }, [loggedInMsnv, state.employees]);
+    const list = isPxsxSession ? pxsxEmployees : state.employees;
+    return list.find((e) => normalizeMsnv4(e.msnv) === norm && e.active);
+  }, [loggedInMsnv, isPxsxSession, pxsxEmployees, state.employees]);
 
   const currentAccount = useMemo(() => {
     if (!currentEmployee) return undefined;
-    const acc = authAccounts[currentEmployee.msnv];
+    const accMap = isPxsxSession ? pxsxAuthAccounts : authAccounts;
+    const acc = accMap[currentEmployee.msnv];
     if (!acc || !acc.accessGranted) return undefined;
     return acc;
-  }, [authAccounts, currentEmployee]);
+  }, [isPxsxSession, pxsxAuthAccounts, authAccounts, currentEmployee]);
+
+  const isPxsxManager =
+    isPxsxSession && currentEmployee ? PXSX_MANAGER_MSNVS.has(normalizeMsnv4(currentEmployee.msnv)) : false;
 
   const perms = useMemo(
     () => (currentAccount ? getRolePermissions(currentAccount) : null),
@@ -228,22 +257,35 @@ export function App() {
     return filterPayrollByRole(fullCalc, currentAccount, authAccounts, state.employees);
   }, [fullCalc, currentAccount, authAccounts, state.employees]);
 
-  const handleLoginSuccess = (account: AuthAccount) => {
+  const handleLoginSuccess = (
+    account: AuthAccount,
+    _employee: EmployeeMaster,
+    dept: LoginDeptKey,
+  ) => {
     setLoggedInMsnv(account.msnv);
+    setLoggedInDept(dept);
     try {
       sessionStorage.setItem(SESSION_STORAGE_KEY, account.msnv);
+      sessionStorage.setItem(SESSION_DEPT_KEY, dept);
     } catch {
       // ignore sessionStorage error
     }
-    setActiveTab('tab3');
+    if (dept === 'PXSX') {
+      setActiveDept('PXSX');
+    } else {
+      setActiveDept('PKTCN');
+      setActiveTab('tab3');
+    }
   };
 
   const handleLogout = () => {
     setLoggedInMsnv(null);
+    setLoggedInDept('PKTCN');
     setShowSecurityModal(false);
     setShowChangePinModal(false);
     try {
       sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      sessionStorage.removeItem(SESSION_DEPT_KEY);
     } catch {
       // ignore
     }
@@ -695,9 +737,27 @@ export function App() {
     });
   };
 
-  // Nhân viên hoặc bất kỳ user nào tự đổi mã PIN cá nhân -> lưu thẳng lên bảng ktcn_security_pins trên Supabase
+  // Nhân viên hoặc bất kỳ user nào tự đổi mã PIN cá nhân -> lưu thẳng lên bảng ktcn_security_pins trên Supabase (hoặc localStorage cho PXSX)
   const handleChangeOwnPin = (newPin: string) => {
     if (!currentAccount) return;
+    if (isPxsxSession) {
+      setPxsxAuthAccounts((prev) => {
+        const acc = prev[currentAccount.msnv];
+        if (!acc) return prev;
+        const updated: Record<string, AuthAccount> = {
+          ...prev,
+          [currentAccount.msnv]: {
+            ...acc,
+            pinHash: sha256Hex(newPin),
+            pinDisplayForAdmin: newPin,
+            updatedAt: new Date().toISOString().slice(0, 10),
+          },
+        };
+        saveStoredPxsxAuthAccounts(updated);
+        return updated;
+      });
+      return;
+    }
     setState((prev) => {
       const currentAuth = buildDefaultAuthAccounts(prev.employees, prev.authAccounts);
       const acc = currentAuth[currentAccount.msnv];
@@ -730,6 +790,8 @@ export function App() {
       <LoginScreen
         employees={state.employees}
         authAccounts={authAccounts}
+        pxsxEmployees={pxsxEmployees}
+        pxsxAuthAccounts={pxsxAuthAccounts}
         onLoginSuccess={handleLoginSuccess}
       />
     );
@@ -1003,7 +1065,7 @@ export function App() {
         </div>
 
         {/* 3 TAG BỘ PHẬN CHÍNH */}
-        {!perms.isSelfOnly && perms.canViewAllRoom && (
+        {!isPxsxSession && !perms.isSelfOnly && perms.canViewAllRoom && (
           <div className="border-t border-slate-800 bg-slate-950/60">
             <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-2 px-4 py-2">
               <span className="mr-1 text-[11px] font-bold tracking-wider text-slate-400 uppercase">
@@ -1243,7 +1305,30 @@ export function App() {
         )}
 
         {/* Giao diện theo Cấp phân quyền */}
-        {perms.isSelfOnly ? (
+        {isPxsxSession && !isPxsxManager ? (
+          <PxsxSelfView
+            employee={currentEmployee}
+            periodLabel={activePeriod.label}
+            sharedItems={sharedProductionItems}
+          />
+        ) : isPxsxSession && isPxsxManager ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-xs text-sky-900">
+              <span className="font-bold text-sky-800">Thao tác hàng tháng (PXSX):</span>
+              <span>
+                <strong>Bước 1:</strong> Nhập <strong>Sản lượng m²</strong> từng loại gạch (DC1, DC2) &amp; <strong>Tiền khiếu nại</strong> ở tab Tổng hợp →
+              </span>
+              <span>
+                <strong>Bước 2:</strong> Chọn <strong>TBTM / DC1 / DC2</strong> để xem bảng chia lương chi tiết từng MSNV.
+              </span>
+            </div>
+            <TabPxsx
+              periodLabel={activePeriod.label}
+              sharedItems={sharedProductionItems}
+              onChangeSharedItems={setSharedProductionItems}
+            />
+          </div>
+        ) : perms.isSelfOnly ? (
           <>
             <div className="no-print">
               <EmployeeSelfView

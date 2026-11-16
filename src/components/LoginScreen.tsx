@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Building2, KeyRound, Lock, ShieldCheck, UserCheck } from 'lucide-react';
+import { Building2, Factory, KeyRound, Lock, ShieldCheck, UserCheck } from 'lucide-react';
 import type { AuthAccount, EmployeeMaster } from '../types/payroll';
 import {
   authenticateWithPin,
@@ -8,17 +8,24 @@ import {
   TEAM_LABELS,
 } from '../utils/rbacAuth';
 
+export type LoginDeptKey = 'PKTCN' | 'PXSX';
+
 interface LoginScreenProps {
   employees: EmployeeMaster[];
   authAccounts: Record<string, AuthAccount>;
-  onLoginSuccess: (account: AuthAccount, employee: EmployeeMaster) => void;
+  pxsxEmployees: EmployeeMaster[];
+  pxsxAuthAccounts: Record<string, AuthAccount>;
+  onLoginSuccess: (account: AuthAccount, employee: EmployeeMaster, dept: LoginDeptKey) => void;
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({
   employees,
   authAccounts,
+  pxsxEmployees,
+  pxsxAuthAccounts,
   onLoginSuccess,
 }) => {
+  const [loginDept, setLoginDept] = useState<LoginDeptKey>('PKTCN');
   const [msnvInput, setMsnvInput] = useState('1439');
   const [pinDigits, setPinDigits] = useState<[string, string, string, string]>(['', '', '', '']);
   const [error, setError] = useState<string | null>(null);
@@ -29,15 +36,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     useRef<HTMLInputElement>(null),
   ];
 
+  const activeEmployees = loginDept === 'PKTCN' ? employees : pxsxEmployees;
+  const activeAuthAccounts = loginDept === 'PKTCN' ? authAccounts : pxsxAuthAccounts;
+
   const matchedEmp = useMemo(() => {
     const norm = normalizeMsnv4(msnvInput);
-    return employees.find((e) => normalizeMsnv4(e.msnv) === norm);
-  }, [employees, msnvInput]);
+    return activeEmployees.find((e) => normalizeMsnv4(e.msnv) === norm);
+  }, [activeEmployees, msnvInput]);
 
   const matchedAcc = useMemo(() => {
     if (!matchedEmp) return undefined;
-    return authAccounts[matchedEmp.msnv];
-  }, [authAccounts, matchedEmp]);
+    return activeAuthAccounts[matchedEmp.msnv];
+  }, [activeAuthAccounts, matchedEmp]);
 
   const handleDigitChange = (index: number, raw: string) => {
     setError(null);
@@ -83,12 +93,23 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     const norm = normalizeMsnv4(msnvInput);
     setMsnvInput(norm);
     const pin = pinDigits.join('');
-    const res = authenticateWithPin(authAccounts, employees, norm, pin);
+    const res = authenticateWithPin(activeAuthAccounts, activeEmployees, norm, pin);
     if (!res.ok || !res.account || !res.employee) {
       setError(res.error || 'Đăng nhập không thành công.');
       return;
     }
-    onLoginSuccess(res.account, res.employee);
+    onLoginSuccess(res.account, res.employee, loginDept);
+  };
+
+  const handleSwitchDept = (dept: LoginDeptKey) => {
+    setLoginDept(dept);
+    setError(null);
+    setPinDigits(['', '', '', '']);
+    if (dept === 'PKTCN') {
+      setMsnvInput('1439');
+    } else {
+      setMsnvInput('0589');
+    }
   };
 
   const handleSelectQuickUser = (msnv: string) => {
@@ -121,10 +142,43 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-5">
+          {/* Chọn Bộ phận đăng nhập */}
+          <div>
+            <label className="mb-1.5 block text-xs font-bold text-slate-700">
+              Chọn Bộ phận đăng nhập:
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleSwitchDept('PKTCN')}
+                className={`flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition ${
+                  loginDept === 'PKTCN'
+                    ? 'border-blue-600 bg-blue-600 text-white shadow-sm'
+                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <Building2 className="h-3.5 w-3.5" />
+                P.KTCN ({employees.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSwitchDept('PXSX')}
+                className={`flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition ${
+                  loginDept === 'PXSX'
+                    ? 'border-sky-600 bg-sky-600 text-white shadow-sm'
+                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <Factory className="h-3.5 w-3.5" />
+                PXSX ({pxsxEmployees.length})
+              </button>
+            </div>
+          </div>
+
           {/* Chọn hoặc nhập MSNV */}
           <div>
             <label className="mb-1.5 block text-xs font-bold text-slate-700">
-              1. Chọn nhân sự hoặc nhập Mã số nhân viên (MSNV 4 số)
+              1. Chọn nhân sự ({loginDept === 'PKTCN' ? 'P.KTCN' : 'PXSX'}) hoặc nhập MSNV 4 số
             </label>
             <div className="grid grid-cols-12 gap-2">
               <input
@@ -146,10 +200,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 className="col-span-8 rounded-xl border border-slate-300 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-800 focus:border-blue-600 focus:outline-none"
               >
                 <option value="" disabled>
-                  -- Chọn nhanh từ danh sách 23 nhân sự --
+                  -- Chọn nhanh từ danh sách {activeEmployees.length} nhân sự --
                 </option>
-                {employees.map((emp) => {
-                  const acc = authAccounts[emp.msnv];
+                {activeEmployees.map((emp) => {
+                  const acc = activeAuthAccounts[emp.msnv];
                   const norm = normalizeMsnv4(emp.msnv);
                   return (
                     <option key={emp.msnv} value={emp.msnv}>
