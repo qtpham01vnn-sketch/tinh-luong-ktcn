@@ -794,7 +794,7 @@ export function App() {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
       {/* Top Enterprise Header */}
-      <header className="no-print sticky top-0 z-30 border-b border-slate-200 bg-slate-900 text-white shadow">
+      <header className="no-print relative z-30 border-b border-slate-200 bg-slate-900 text-white shadow lg:sticky lg:top-0">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-3">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 font-bold text-white shadow-inner">
