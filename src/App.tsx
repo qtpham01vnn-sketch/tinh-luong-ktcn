@@ -1312,6 +1312,7 @@ export function App() {
                       const pktcnQuotas = MASTER_TARIFFS_2026.PKTCN.quotas;
                       handleUpdatePeriod((prev) => ({
                         ...prev,
+                        inputMode: 'clusters',
                         clusters: sharedProductionItems
                           .filter((it) => !it.noBonus && it.qtyM2 > 0)
                           .map((it) => ({

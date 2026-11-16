@@ -11,6 +11,8 @@ export interface PxsxEmployeeRow {
   hsTN: number;
   hsDH: number;
   congSP: number;
+  congHocViec?: number;
+  hsHocViec?: number;
   hsCongSP: number;
   isBonusZero: boolean;
   overtimePay: number;

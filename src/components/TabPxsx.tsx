@@ -140,6 +140,25 @@ export const DEFAULT_OCT_2026_INPUTS: LineProductInput[] = [
   },
 ];
 
+/** Gợi ý công chuẩn theo số ngày của tháng: 30 ngày -> 26, 31 ngày -> 26.5 */
+function suggestStandardDays(periodLabel: string): number {
+  const m = periodLabel.match(/tháng\s*(\d{1,2})/i);
+  if (!m) return 26.5;
+  const month = Number(m[1]);
+  if ([4, 6, 9, 11].includes(month)) return 26;
+  if (month === 2) return 24;
+  return 26.5;
+}
+
+function computeRowHsCong(emp: PxsxEmployeeRow, stdDays: number): number {
+  const safeStd = stdDays > 0 ? stdDays : 26;
+  const hsTong = emp.hsLuong + emp.hsTN + emp.hsDH;
+  const congChinh = Math.max(0, emp.congSP);
+  const congHV = Math.max(0, emp.congHocViec ?? 0);
+  const hsHV = emp.hsHocViec ?? Math.round(emp.hsLuong * 0.85 * 1000) / 1000;
+  return (hsTong * congChinh + hsHV * congHV) / safeStd;
+}
+
 export const TabPxsx: React.FC<{
   periodLabel: string;
   sharedItems?: LineProductInput[];
@@ -170,22 +189,95 @@ export const TabPxsx: React.FC<{
     DC1: 80,
     DC2: 50,
   });
+  const [stdDaysByDept, setStdDaysByDept] = useState<Record<PxsxDeptKey, number>>(() => {
+    const autoDays = suggestStandardDays(periodLabel);
+    return { TBTM: 26, DC1: autoDays, DC2: autoDays };
+  });
+  const [sharedPoolMode, setSharedPoolMode] = useState<'SPLIT_VP_M2' | 'MERGE_ALL_HS'>('SPLIT_VP_M2');
   const [knDc1, setKnDc1] = useState<number>(6640194.5);
   const [knDc2, setKnDc2] = useState<number>(7508208.37);
   const [knTbtm, setKnTbtm] = useState<number>(4250367.13);
 
-  const updateEmployeeCong = (dept: PxsxDeptKey, msnv: string, newCong: number) => {
-    const stdDays = PXSX_DEPT_CONFIGS_OCT_2026[dept].standardDays;
+  const updateStandardDays = (dept: PxsxDeptKey, nextDays: number) => {
+    const safeDays = Math.max(1, nextDays);
+    setStdDaysByDept((prev) => ({ ...prev, [dept]: safeDays }));
+    setEmployees((prev) =>
+      prev.map((emp) =>
+        emp.dept === dept ? { ...emp, hsCongSP: computeRowHsCong(emp, safeDays) } : emp,
+      ),
+    );
+  };
+
+  const updateEmployeeCong = (dept: PxsxDeptKey, rowIndexInDept: number, newCong: number) => {
+    const stdDays = stdDaysByDept[dept];
+    let cursor = -1;
     setEmployees((prev) =>
       prev.map((emp) => {
-        if (emp.dept !== dept || emp.msnv !== msnv) return emp;
-        const hsTong = emp.hsLuong + emp.hsTN + emp.hsDH;
-        const rawOld = emp.congSP > 0 ? (hsTong * emp.congSP) / stdDays : 0;
-        const ratio = rawOld > 0 ? emp.hsCongSP / rawOld : 1;
-        const nextHsCong = ((hsTong * Math.max(0, newCong)) / stdDays) * ratio;
-        return { ...emp, congSP: Math.max(0, newCong), hsCongSP: nextHsCong };
+        if (emp.dept !== dept) return emp;
+        cursor++;
+        if (cursor !== rowIndexInDept) return emp;
+        const updated = { ...emp, congSP: Math.max(0, newCong) };
+        return { ...updated, hsCongSP: computeRowHsCong(updated, stdDays) };
       }),
     );
+  };
+
+  const updateEmployeeCongHV = (dept: PxsxDeptKey, rowIndexInDept: number, newCongHV: number) => {
+    const stdDays = stdDaysByDept[dept];
+    let cursor = -1;
+    setEmployees((prev) =>
+      prev.map((emp) => {
+        if (emp.dept !== dept) return emp;
+        cursor++;
+        if (cursor !== rowIndexInDept) return emp;
+        const hsHocViec = emp.hsHocViec ?? Math.round(emp.hsLuong * 0.85 * 1000) / 1000;
+        const updated = { ...emp, congHocViec: Math.max(0, newCongHV), hsHocViec };
+        return { ...updated, hsCongSP: computeRowHsCong(updated, stdDays) };
+      }),
+    );
+  };
+
+  const toggleEmployeeBonusZero = (dept: PxsxDeptKey, rowIndexInDept: number) => {
+    let cursor = -1;
+    setEmployees((prev) =>
+      prev.map((emp) => {
+        if (emp.dept !== dept) return emp;
+        cursor++;
+        if (cursor !== rowIndexInDept) return emp;
+        return { ...emp, isBonusZero: !emp.isBonusZero };
+      }),
+    );
+  };
+
+  const duplicateEmployeeRow = (dept: PxsxDeptKey, rowIndexInDept: number) => {
+    const stdDays = stdDaysByDept[dept];
+    let cursor = -1;
+    setEmployees((prev) => {
+      const next: PxsxEmployeeRow[] = [];
+      for (const emp of prev) {
+        next.push(emp);
+        if (emp.dept === dept) {
+          cursor++;
+          if (cursor === rowIndexInDept) {
+            const hsHV = Math.round(emp.hsLuong * 0.85 * 1000) / 1000;
+            const cloned: PxsxEmployeeRow = {
+              ...emp,
+              hsLuong: hsHV,
+              hsTN: 0,
+              hsDH: 0,
+              congSP: 0,
+              congHocViec: 0,
+              isBonusZero: true,
+              overtimePay: 0,
+              note: 'Tách mức HS học việc (85%)',
+              hsCongSP: computeRowHsCong({ ...emp, hsLuong: hsHV, hsTN: 0, hsDH: 0, congSP: 0 }, stdDays),
+            };
+            next.push(cloned);
+          }
+        }
+      }
+      return next;
+    });
   };
 
   const handleAddEmployee = (dept: PxsxDeptKey) => {
@@ -387,8 +479,11 @@ export const TabPxsx: React.FC<{
   const deptView = useMemo(() => {
     if (subView === 'OVERVIEW') return null;
     const cfg = PXSX_DEPT_CONFIGS_OCT_2026[subView];
+    const standardDays = stdDaysByDept[subView];
     const bonusSharePct = bonusShareByDept[subView];
-    const allDeptRows = employees.filter((r) => r.dept === subView);
+    const allDeptRows = employees
+      .filter((r) => r.dept === subView)
+      .map((r, deptRowIndex) => ({ ...r, deptRowIndex }));
 
     // Lấy Quỹ lương & Quỹ thưởng động trực tiếp từ bảng Nhập Sản lượng & Khiếu nại
     const liveFundLuong =
@@ -397,26 +492,29 @@ export const TabPxsx: React.FC<{
       subView === 'TBTM' ? calc.tbtmThuong : subView === 'DC1' ? calc.dc1Thuong : calc.dc2Thuong;
     const liveKn = subView === 'TBTM' ? knTbtm : subView === 'DC1' ? knDc1 : knDc2;
     const liveThuongSauKn = Math.max(0, liveRawThuong - liveKn);
-    const liveThuongChi = liveThuongSauKn * (bonusSharePct / 100);
-    const liveDuPhong = liveThuongSauKn - liveThuongChi;
+    const liveThuongChiNominal = liveThuongSauKn * (bonusSharePct / 100);
+    const liveDuPhongBase = liveThuongSauKn - liveThuongChiNominal;
 
     const totalHsCong = allDeptRows.reduce((s, r) => s + r.hsCongSP, 0);
-    const totalHsCongEligible = allDeptRows.reduce(
-      (s, r) => s + (r.isBonusZero ? 0 : r.hsCongSP),
-      0,
-    );
     const donGiaLuong = totalHsCong > 0 ? liveFundLuong / totalHsCong : 0;
-    const donGiaThuong = totalHsCongEligible > 0 ? liveThuongChi / totalHsCongEligible : 0;
+    // Giữ nguyên thưởng của những người khác; phần thưởng bị trừ cá nhân sẽ cộng vào Quỹ dự phòng
+    const donGiaThuong = totalHsCong > 0 ? liveThuongChiNominal / totalHsCong : 0;
     const hs1NoBonus = Math.round(donGiaLuong);
     const hs1WithBonus = Math.round(donGiaLuong + donGiaThuong);
     const totalOvertimePay = allDeptRows.reduce((s, r) => s + r.overtimePay, 0);
 
+    let penaltyToReserve = 0;
     const calculatedRows = allDeptRows.map((r) => {
       const luongSP = Math.round(r.hsCongSP * donGiaLuong);
-      const thuong = r.isBonusZero ? 0 : Math.round(r.hsCongSP * donGiaThuong);
+      const rawThuong = Math.round(r.hsCongSP * donGiaThuong);
+      if (r.isBonusZero) penaltyToReserve += rawThuong;
+      const thuong = r.isBonusZero ? 0 : rawThuong;
       const totalPay = luongSP + thuong + r.overtimePay;
       return { ...r, liveLuongSP: luongSP, liveThuong: thuong, liveTotalPay: totalPay };
     });
+
+    const liveThuongChi = Math.max(0, liveThuongChiNominal - penaltyToReserve);
+    const liveDuPhong = liveDuPhongBase + penaltyToReserve;
 
     const groups = Array.from(new Set(calculatedRows.map((r) => r.group).filter(Boolean)));
     const q = searchQuery.trim().toLowerCase();
@@ -435,7 +533,7 @@ export const TabPxsx: React.FC<{
       (acc, r) => {
         const hsTong = r.hsLuong + r.hsTN + r.hsDH;
         acc.hsTong += hsTong;
-        acc.congSP += r.congSP;
+        acc.congSP += r.congSP + (r.congHocViec ?? 0);
         acc.hsCongSP += r.hsCongSP;
         acc.luongSP += r.liveLuongSP;
         acc.thuong += r.liveThuong;
@@ -447,11 +545,12 @@ export const TabPxsx: React.FC<{
     );
 
     return {
-      cfg,
+      cfg: { ...cfg, standardDays },
       bonusSharePct,
       liveFundLuong,
       liveThuongChi,
       liveDuPhong,
+      penaltyToReserve,
       totalHsCong,
       hs1NoBonus,
       hs1WithBonus,
@@ -461,7 +560,7 @@ export const TabPxsx: React.FC<{
       filtered,
       totals,
     };
-  }, [subView, searchQuery, groupFilter, employees, bonusShareByDept, calc, knDc1, knDc2, knTbtm]);
+  }, [subView, searchQuery, groupFilter, employees, bonusShareByDept, stdDaysByDept, calc, knDc1, knDc2, knTbtm]);
 
   return (
     <>
@@ -492,9 +591,9 @@ export const TabPxsx: React.FC<{
         {(
           [
             { key: 'OVERVIEW', label: 'Tổng hợp Quỹ PXSX' },
-            { key: 'TBTM', label: 'Chi tiết TBTM (26 công, 50% thưởng)' },
-            { key: 'DC1', label: 'Chi tiết DC1 (26.5 công, 80% thưởng)' },
-            { key: 'DC2', label: 'Chi tiết DC2 (26.5 công, 50% thưởng)' },
+            { key: 'TBTM', label: `Chi tiết TBTM (${stdDaysByDept.TBTM} công, ${bonusShareByDept.TBTM}% thưởng)` },
+            { key: 'DC1', label: `Chi tiết DC1 (${stdDaysByDept.DC1} công, ${bonusShareByDept.DC1}% thưởng)` },
+            { key: 'DC2', label: `Chi tiết DC2 (${stdDaysByDept.DC2} công, ${bonusShareByDept.DC2}% thưởng)` },
           ] as const
         ).map((tab) => (
           <button
@@ -521,8 +620,36 @@ export const TabPxsx: React.FC<{
           <div className="grid gap-3 md:grid-cols-4">
             <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="text-[11px] font-semibold text-slate-500 uppercase">Quy chuẩn chia lương</div>
-              <div className="mt-1 text-base font-bold text-slate-900">
-                {deptView.cfg.standardDays} công chuẩn | Chia{' '}
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-sm font-bold text-slate-900">
+                <div className="inline-flex rounded-md border border-slate-200 bg-slate-100 p-0.5 text-xs">
+                  {([26, 26.5, 27] as const).map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => updateStandardDays(deptView.cfg.dept, d)}
+                      className={`rounded px-2 py-0.5 font-semibold transition ${
+                        deptView.cfg.standardDays === d
+                          ? 'bg-blue-700 text-white shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="number"
+                  step="0.5"
+                  min={1}
+                  max={31}
+                  value={deptView.cfg.standardDays}
+                  onChange={(e) =>
+                    updateStandardDays(deptView.cfg.dept, Number(e.target.value) || 26)
+                  }
+                  className="w-14 rounded border border-slate-300 px-1.5 py-0.5 text-center text-xs font-bold text-slate-800"
+                  title="Tự nhập công chuẩn"
+                />
+                <span className="text-xs font-medium text-slate-500">công | Chia</span>
                 <input
                   type="number"
                   min={0}
@@ -534,12 +661,12 @@ export const TabPxsx: React.FC<{
                       [deptView.cfg.dept]: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
                     }))
                   }
-                  className="w-12 rounded border border-slate-300 px-1 py-0.5 text-center text-sm font-bold text-blue-700"
+                  className="w-12 rounded border border-slate-300 px-1 py-0.5 text-center text-xs font-bold text-blue-700"
                 />
-                % thưởng
+                <span className="text-xs font-medium text-slate-500">% thưởng</span>
               </div>
               <div className="mt-1 text-xs text-slate-600">
-                Tổng nhân sự: <strong>{deptView.allCount} CBCNV</strong> | Tổng HS công:{' '}
+                Tổng nhân sự: <strong>{deptView.allCount} dòng</strong> | Tổng HS công:{' '}
                 <strong>{deptView.totalHsCong.toFixed(4)}</strong>
               </div>
             </div>
@@ -572,7 +699,12 @@ export const TabPxsx: React.FC<{
                 {formatVND(deptView.liveThuongChi)} đ
               </div>
               <div className="mt-1 text-xs text-slate-600">
-                Quỹ dự phòng giữ lại: <strong>{formatVND(deptView.liveDuPhong)} đ</strong>
+                Quỹ dự phòng (gửi P.KT-TC): <strong>{formatVND(deptView.liveDuPhong)} đ</strong>
+                {deptView.penaltyToReserve > 0 && (
+                  <span className="ml-1 text-[11px] text-amber-700">
+                    (gồm +{formatVND(deptView.penaltyToReserve)} đ trừ thưởng)
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -707,19 +839,22 @@ export const TabPxsx: React.FC<{
                     <th className="p-2 text-right font-semibold">HS ĐH</th>
                     <th className="p-2 text-right font-semibold">HS Tổng</th>
                     <th className="p-2 text-right font-semibold">Công SP</th>
+                    <th className="p-2 text-right font-semibold" title="Công học việc (85% HS) trên cùng 1 dòng">
+                      Công HV
+                    </th>
                     <th className="p-2 text-right font-semibold">HS Công SP</th>
                     <th className="p-2 text-right font-semibold">Lương SP</th>
                     <th className="p-2 text-right font-semibold">Thưởng SL+CL</th>
                     <th className="p-2 text-right font-semibold">Tăng ca</th>
                     <th className="p-2 text-right font-semibold">Tổng Thực Lãnh</th>
-                    <th className="p-2 text-center font-semibold">Xóa</th>
+                    <th className="p-2 text-center font-semibold">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {deptView.filtered.map((emp, idx) => {
                     const hsTong = emp.hsLuong + emp.hsTN + emp.hsDH;
                     return (
-                      <tr key={`${emp.dept}-${emp.msnv}-${idx}`} className="hover:bg-slate-50">
+                      <tr key={`${emp.dept}-${emp.msnv}-${emp.deptRowIndex}-${idx}`} className="hover:bg-slate-50">
                         <td className="p-2 text-slate-500">{emp.stt}</td>
                         <td className="p-2 font-mono font-semibold text-slate-700">{emp.msnv}</td>
                         <td className="p-2 font-semibold text-slate-900">{emp.fullName}</td>
@@ -738,9 +873,22 @@ export const TabPxsx: React.FC<{
                             min={0}
                             value={emp.congSP}
                             onChange={(e) =>
-                              updateEmployeeCong(emp.dept, emp.msnv, Number(e.target.value) || 0)
+                              updateEmployeeCong(emp.dept, emp.deptRowIndex, Number(e.target.value) || 0)
                             }
-                            className="w-16 rounded border border-slate-300 px-1.5 py-0.5 text-right font-mono text-xs focus:border-blue-500 focus:outline-none"
+                            className="w-16 rounded border border-sky-300 bg-sky-50/60 px-1.5 py-0.5 text-right font-mono text-xs font-semibold focus:border-blue-500 focus:bg-white focus:outline-none"
+                          />
+                        </td>
+                        <td className="p-1.5 text-right font-mono">
+                          <input
+                            type="number"
+                            step="0.25"
+                            min={0}
+                            value={emp.congHocViec ?? 0}
+                            onChange={(e) =>
+                              updateEmployeeCongHV(emp.dept, emp.deptRowIndex, Number(e.target.value) || 0)
+                            }
+                            title={`Công học việc tính theo HS ${(emp.hsHocViec ?? Math.round(emp.hsLuong * 0.85 * 1000) / 1000).toFixed(3)}`}
+                            className="w-14 rounded border border-slate-200 px-1.5 py-0.5 text-right font-mono text-xs text-slate-700 focus:border-blue-500 focus:outline-none"
                           />
                         </td>
                         <td className="p-2 text-right font-mono font-semibold text-blue-700">
@@ -748,13 +896,18 @@ export const TabPxsx: React.FC<{
                         </td>
                         <td className="p-2 text-right font-mono">{formatVND(emp.liveLuongSP)}</td>
                         <td className="p-2 text-right font-mono text-emerald-700">
-                          {emp.isBonusZero ? (
-                            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
-                              0 đ (Thử việc/Kỷ luật)
-                            </span>
-                          ) : (
-                            formatVND(emp.liveThuong)
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => toggleEmployeeBonusZero(emp.dept, emp.deptRowIndex)}
+                            title="Bấm để bật/tắt Trừ thưởng cá nhân (cộng vào Quỹ dự phòng)"
+                            className={`rounded px-1.5 py-0.5 transition ${
+                              emp.isBonusZero
+                                ? 'bg-amber-100 text-[10px] font-semibold text-amber-800 hover:bg-amber-200'
+                                : 'hover:bg-emerald-50'
+                            }`}
+                          >
+                            {emp.isBonusZero ? '0 đ (Trừ thưởng)' : formatVND(emp.liveThuong)}
+                          </button>
                         </td>
                         <td className="p-2 text-right font-mono text-indigo-700">
                           {emp.overtimePay > 0 ? formatVND(emp.overtimePay) : '—'}
@@ -763,14 +916,24 @@ export const TabPxsx: React.FC<{
                           {formatVND(emp.liveTotalPay)}
                         </td>
                         <td className="p-2 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteEmployee(emp.dept, emp.msnv, emp.fullName)}
-                            title="Xóa nhân viên"
-                            className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => duplicateEmployeeRow(emp.dept, emp.deptRowIndex)}
+                              title="Tách thêm 1 dòng cùng MSNV (học việc / 2 mức HS)"
+                              className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+                            >
+                              +2HS
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteEmployee(emp.dept, emp.msnv, emp.fullName)}
+                              title="Xóa nhân viên"
+                              className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -779,10 +942,10 @@ export const TabPxsx: React.FC<{
                 <tfoot>
                   <tr className="border-t-2 border-slate-300 bg-slate-100 font-bold text-slate-900">
                     <td colSpan={8} className="p-2.5 text-right uppercase">
-                      Tổng cộng ({deptView.filtered.length} CBCNV):
+                      Tổng cộng ({deptView.filtered.length} dòng):
                     </td>
                     <td className="p-2.5 text-right font-mono">{deptView.totals.hsTong.toFixed(2)}</td>
-                    <td className="p-2.5 text-right font-mono">{deptView.totals.congSP.toFixed(2)}</td>
+                    <td className="p-2.5 text-right font-mono" colSpan={2}>{deptView.totals.congSP.toFixed(2)}</td>
                     <td className="p-2.5 text-right font-mono text-blue-800">
                       {deptView.totals.hsCongSP.toFixed(4)}
                     </td>
@@ -1016,11 +1179,140 @@ export const TabPxsx: React.FC<{
         </div>
       </div>
 
+      {/* Tùy chọn Chia quỹ Nhóm dùng chung (Phòng Điều Hành / Xe Nâng / VSCN) */}
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">
+              Phân bổ Quỹ Lương &amp; Thưởng cho Nhóm dùng chung (Phòng Điều Hành / Xe Nâng / VSCN)
+            </h3>
+            <p className="text-xs text-slate-500">
+              Chọn 1 trong 2 phương án chia quỹ trích từ DC1, DC2 và TBTM.
+            </p>
+          </div>
+          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setSharedPoolMode('SPLIT_VP_M2')}
+              className={`rounded-md px-3 py-1.5 transition ${
+                sharedPoolMode === 'SPLIT_VP_M2'
+                  ? 'bg-white text-blue-700 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              PA1: Tách ĐG VP (60đ DC1 + 64–76đ DC2)
+            </button>
+            <button
+              type="button"
+              onClick={() => setSharedPoolMode('MERGE_ALL_HS')}
+              className={`rounded-md px-3 py-1.5 transition ${
+                sharedPoolMode === 'MERGE_ALL_HS'
+                  ? 'bg-white text-blue-700 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              PA2: Gộp chung PXSX theo HS công
+            </button>
+          </div>
+        </div>
+
+        {sharedPoolMode === 'SPLIT_VP_M2' ? (
+          (() => {
+            const dc1M2 = items.filter((i) => i.line === 'DC1').reduce((s, i) => s + i.qtyM2, 0);
+            const dc2_4080 = items
+              .filter((i) => i.line === 'DC2' && i.productCode === '40x80')
+              .reduce((s, i) => s + i.qtyM2, 0);
+            const dc2_6060 = items
+              .filter((i) => i.line === 'DC2' && i.productCode === '60x60')
+              .reduce((s, i) => s + i.qtyM2, 0);
+            const dc2_5050 = items
+              .filter((i) => i.line === 'DC2' && i.productCode === '50x50')
+              .reduce((s, i) => s + i.qtyM2, 0);
+            const vpDc1 = dc1M2 * 60;
+            const vpDc2 = dc2_4080 * 64 + dc2_6060 * 76 + dc2_5050 * 67;
+            const totalVpFund = vpDc1 + vpDc2;
+            const sxNetFund = Math.max(0, calc.dc1Khoan + calc.dc2Khoan - totalVpFund);
+            return (
+              <div className="grid gap-3 sm:grid-cols-4">
+                <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-3">
+                  <div className="text-[11px] font-semibold text-blue-800">Trích VP từ DC1 (60 đ/m²)</div>
+                  <div className="mt-1 text-base font-bold text-blue-950 tabular-nums">{formatVND(vpDc1)} đ</div>
+                </div>
+                <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 p-3">
+                  <div className="text-[11px] font-semibold text-indigo-800">Trích VP từ DC2 (64–76 đ/m²)</div>
+                  <div className="mt-1 text-base font-bold text-indigo-950 tabular-nums">{formatVND(vpDc2)} đ</div>
+                </div>
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-3">
+                  <div className="text-[11px] font-semibold text-emerald-800">Tổng Quỹ Phòng Điều Hành</div>
+                  <div className="mt-1 text-base font-extrabold text-emerald-950 tabular-nums">{formatVND(totalVpFund)} đ</div>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="text-[11px] font-semibold text-slate-600">Quỹ Sản xuất DC1+DC2 còn lại</div>
+                  <div className="mt-1 text-base font-bold text-slate-900 tabular-nums">{formatVND(sxNetFund)} đ</div>
+                </div>
+              </div>
+            );
+          })()
+        ) : (
+          (() => {
+            const totalAllHs = employees.reduce((s, r) => s + r.hsCongSP, 0);
+            const totalAllLuong = calc.dc1Khoan + calc.dc2Khoan + calc.tbtmKhoan;
+            const totalAllThuongChi =
+              Math.max(0, calc.dc1Thuong - knDc1) * (bonusShareByDept.DC1 / 100) +
+              Math.max(0, calc.dc2Thuong - knDc2) * (bonusShareByDept.DC2 / 100) +
+              Math.max(0, calc.tbtmThuong - knTbtm) * (bonusShareByDept.TBTM / 100);
+            const groupMap = new Map<string, { hsCong: number; count: number }>();
+            for (const emp of employees) {
+              const cur = groupMap.get(emp.group) ?? { hsCong: 0, count: 0 };
+              cur.hsCong += emp.hsCongSP;
+              cur.count += 1;
+              groupMap.set(emp.group, cur);
+            }
+            const groupRows = Array.from(groupMap.entries()).map(([name, g]) => {
+              const ratio = totalAllHs > 0 ? g.hsCong / totalAllHs : 0;
+              return {
+                name,
+                count: g.count,
+                hsCong: g.hsCong,
+                luong: totalAllLuong * ratio,
+                thuong: totalAllThuongChi * ratio,
+              };
+            });
+            return (
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50 text-slate-600">
+                      <th className="p-2 text-left">Nhóm / Bộ phận</th>
+                      <th className="p-2 text-right">Số người</th>
+                      <th className="p-2 text-right">Tổng HS công thực tế</th>
+                      <th className="p-2 text-right">Quỹ Lương phân bổ</th>
+                      <th className="p-2 text-right">Quỹ Thưởng phân bổ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {groupRows.map((g) => (
+                      <tr key={g.name} className="hover:bg-slate-50">
+                        <td className="p-2 font-medium text-slate-800">{g.name}</td>
+                        <td className="p-2 text-right font-mono">{g.count}</td>
+                        <td className="p-2 text-right font-mono text-blue-700">{g.hsCong.toFixed(4)}</td>
+                        <td className="p-2 text-right font-mono font-semibold">{formatVND(g.luong)} đ</td>
+                        <td className="p-2 text-right font-mono text-emerald-700">{formatVND(g.thuong)} đ</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()
+        )}
+      </div>
+
       {/* Status Box nhân sự đã nạp */}
       <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-xs text-emerald-900">
         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
         <div>
-          <strong>Đã nạp đủ Bảng Chia Lương PXSX Tháng 10/2026 ({PXSX_EMPLOYEES_OCT_2026.length} CBCNV):</strong> Chọn các tab phía trên (<strong>TBTM</strong>, <strong>DC1</strong>, <strong>DC2</strong>) để xem chi tiết từng MSNV, hệ số công sản phẩm (26 công cho TBTM; 26.5 công cho DC1 &amp; DC2), tỷ lệ chi thưởng (50% / 80%), tăng ca và thực lãnh.
+          <strong>Đã nạp đủ Bảng Chia Lương PXSX ({employees.length} dòng nhân sự):</strong> Công chuẩn tự động gợi ý theo số ngày trong tháng (30 ngày → 26 công; 31 ngày → 26.5 công) và có nút chọn nhanh <strong>26 / 26.5 / 27</strong> ở từng dây chuyền.
         </div>
       </div>
         </>

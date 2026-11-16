@@ -7,6 +7,7 @@ import {
   FileCheck2,
   FileSpreadsheet,
   FileText,
+  Pencil,
   Plus,
   ShieldAlert,
   Trash2,
@@ -42,6 +43,60 @@ interface Tab1Props {
   readOnly?: boolean;
 }
 
+/** Ô nhập số có dấu phân cách hàng nghìn (vi-VN) khi xem và nhập/dán linh hoạt từ Excel */
+const FormattedNumberInput: React.FC<{
+  value: number;
+  onChange: (val: number) => void;
+  decimals?: number;
+  min?: number;
+  max?: number;
+  disabled?: boolean;
+  placeholder?: string;
+  className?: string;
+}> = ({ value, onChange, decimals = 2, min = 0, max, disabled, placeholder, className = '' }) => {
+  const [focused, setFocused] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  const displayValue = focused
+    ? draft
+    : value === 0 && placeholder
+      ? ''
+      : formatDecimal(value, decimals);
+
+  const commit = () => {
+    setFocused(false);
+    let parsed = parseNumberLoose(draft);
+    if (min !== undefined) parsed = Math.max(min, parsed);
+    if (max !== undefined) parsed = Math.min(max, parsed);
+    if (parsed !== value) onChange(parsed);
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      disabled={disabled}
+      placeholder={placeholder}
+      value={displayValue}
+      onFocus={(e) => {
+        setFocused(true);
+        setDraft(value === 0 ? '' : String(value).replace('.', ','));
+        requestAnimationFrame(() => e.target.select());
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        if (e.key === 'Escape') {
+          setFocused(false);
+          setDraft('');
+        }
+      }}
+      className={className}
+    />
+  );
+};
+
 export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
   period,
   calc,
@@ -60,7 +115,7 @@ export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
   // New deduction form state
   const [dedDate, setDedDate] = useState(period.periodKey);
   const [dedDesc, setDedDesc] = useState('');
-  const [dedAmount, setDedAmount] = useState('');
+  const [dedAmount, setDedAmount] = useState(0);
   const [dedScope, setDedScope] = useState<'quy_thuong_chung' | 'ca_nhan'>('quy_thuong_chung');
   const [dedMsnv, setDedMsnv] = useState(employees[0]?.msnv || '');
 
@@ -135,7 +190,7 @@ export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
 
   const handleAddDeduction = (e: React.FormEvent) => {
     e.preventDefault();
-    const amt = parseNumberLoose(dedAmount);
+    const amt = dedAmount;
     if (!dedDesc.trim() || !Number.isFinite(amt) || amt <= 0) return;
     const entry: DeductionEntry = {
       id: `ded_${Date.now()}`,
@@ -150,7 +205,7 @@ export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
       deductions: [...prev.deductions, entry],
     }));
     setDedDesc('');
-    setDedAmount('');
+    setDedAmount(0);
   };
 
   const handleDeleteDeduction = (id: string) => {
@@ -394,16 +449,54 @@ export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
           </div>
         </div>
 
+        {/* Chú thích phân biệt ô nhập hàng tháng & quy trình nhảy lương */}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50/70 px-3.5 py-2.5 text-xs text-slate-700">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span className="inline-flex items-center gap-1.5 font-semibold text-sky-900">
+              <span className="inline-block h-3 w-3 rounded border-2 border-sky-400 bg-sky-100" />
+              Ô viền xanh: Nhập hàng tháng để nhảy lương
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-slate-600">
+              <span className="inline-block h-3 w-3 rounded border border-slate-300 bg-slate-100" />
+              Ô nền xám: Cố định theo quy chế (chỉ sửa khi đổi đơn giá)
+            </span>
+          </div>
+          <span className="text-[11px] font-medium text-sky-800">
+            Nhập đủ: Sản lượng m² → % Thưởng → Lương BD DC2 → Giảm trừ (nếu có) → Công thực tế (Tab 3)
+          </span>
+        </div>
+
         {period.inputMode === 'clusters' ? (
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold text-slate-600">
                   <th className="px-3 py-2">Tên cụm / Dây chuyền</th>
-                  <th className="px-3 py-2 text-right">Sản lượng / HS</th>
-                  <th className="px-3 py-2 text-right">Đơn giá khoán (đ)</th>
-                  <th className="px-3 py-2 text-right">% Thưởng SL</th>
-                  <th className="px-3 py-2 text-right">% Thưởng CL</th>
+                  <th className="bg-sky-50/80 px-3 py-2 text-right text-sky-900">
+                    <span className="inline-flex items-center gap-1">
+                      <Pencil className="h-3 w-3 text-sky-600" />
+                      Sản lượng / HS
+                    </span>
+                    <div className="text-[10px] font-normal text-sky-700">Nhập hàng tháng</div>
+                  </th>
+                  <th className="px-3 py-2 text-right">
+                    Đơn giá khoán (đ)
+                    <div className="text-[10px] font-normal text-slate-400">Cố định</div>
+                  </th>
+                  <th className="bg-sky-50/80 px-3 py-2 text-right text-sky-900">
+                    <span className="inline-flex items-center gap-1">
+                      <Pencil className="h-3 w-3 text-sky-600" />
+                      % Thưởng SL
+                    </span>
+                    <div className="text-[10px] font-normal text-sky-700">Nhập tháng</div>
+                  </th>
+                  <th className="bg-sky-50/80 px-3 py-2 text-right text-sky-900">
+                    <span className="inline-flex items-center gap-1">
+                      <Pencil className="h-3 w-3 text-sky-600" />
+                      % Thưởng CL
+                    </span>
+                    <div className="text-[10px] font-normal text-sky-700">Nhập tháng</div>
+                  </th>
                   <th className="px-3 py-2 text-right">Thành tiền Quỹ khoán</th>
                   <th className="px-3 py-2 text-right">Thưởng gộp cụm (đ)</th>
                   <th className="px-3 py-2 text-center">Xóa</th>
@@ -418,49 +511,46 @@ export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
                       <td className="px-2 py-1.5">
                         <input
                           type="text"
+                          disabled={readOnly}
                           value={c.name}
                           onChange={(e) => handleClusterChange(c.id, 'name', e.target.value)}
-                          className="w-full rounded border border-slate-200 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+                          className="w-full rounded border border-slate-200 bg-slate-50/70 px-2 py-1 text-sm text-slate-800 focus:border-blue-500 focus:bg-white focus:outline-none"
                         />
                       </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="number"
-                          step="0.01"
+                      <td className="bg-sky-50/30 px-2 py-1.5">
+                        <FormattedNumberInput
                           value={c.quantity}
-                          onChange={(e) => handleClusterChange(c.id, 'quantity', e.target.value)}
-                          className="w-28 rounded border border-slate-200 px-2 py-1 text-right text-sm tabular-nums focus:border-blue-500 focus:outline-none"
+                          decimals={2}
+                          disabled={readOnly}
+                          onChange={(v) => handleClusterChange(c.id, 'quantity', v)}
+                          className="w-32 rounded border-2 border-sky-400 bg-sky-50/80 px-2 py-1 text-right text-sm font-bold text-slate-900 tabular-nums focus:border-sky-600 focus:bg-white focus:ring-2 focus:ring-sky-200 focus:outline-none"
                         />
                       </td>
                       <td className="px-2 py-1.5">
-                        <input
-                          type="number"
-                          step="0.01"
+                        <FormattedNumberInput
                           value={c.unitPrice}
-                          onChange={(e) => handleClusterChange(c.id, 'unitPrice', e.target.value)}
-                          className="w-28 rounded border border-slate-200 px-2 py-1 text-right text-sm tabular-nums focus:border-blue-500 focus:outline-none"
+                          decimals={2}
+                          disabled={readOnly}
+                          onChange={(v) => handleClusterChange(c.id, 'unitPrice', v)}
+                          className="w-24 rounded border border-slate-200 bg-slate-50/70 px-2 py-1 text-right text-sm text-slate-700 tabular-nums focus:border-blue-500 focus:bg-white focus:outline-none"
                         />
                       </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="number"
-                          step="0.1"
+                      <td className="bg-sky-50/30 px-2 py-1.5">
+                        <FormattedNumberInput
                           value={c.bonusOutputPct}
-                          onChange={(e) =>
-                            handleClusterChange(c.id, 'bonusOutputPct', e.target.value)
-                          }
-                          className="w-20 rounded border border-slate-200 px-2 py-1 text-right text-sm tabular-nums focus:border-blue-500 focus:outline-none"
+                          decimals={2}
+                          disabled={readOnly}
+                          onChange={(v) => handleClusterChange(c.id, 'bonusOutputPct', v)}
+                          className="w-20 rounded border-2 border-sky-400 bg-sky-50/80 px-2 py-1 text-right text-sm font-bold text-slate-900 tabular-nums focus:border-sky-600 focus:bg-white focus:ring-2 focus:ring-sky-200 focus:outline-none"
                         />
                       </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="number"
-                          step="0.1"
+                      <td className="bg-sky-50/30 px-2 py-1.5">
+                        <FormattedNumberInput
                           value={c.bonusQualityPct}
-                          onChange={(e) =>
-                            handleClusterChange(c.id, 'bonusQualityPct', e.target.value)
-                          }
-                          className="w-20 rounded border border-slate-200 px-2 py-1 text-right text-sm tabular-nums focus:border-blue-500 focus:outline-none"
+                          decimals={2}
+                          disabled={readOnly}
+                          onChange={(v) => handleClusterChange(c.id, 'bonusQualityPct', v)}
+                          className="w-20 rounded border-2 border-sky-400 bg-sky-50/80 px-2 py-1 text-right text-sm font-bold text-slate-900 tabular-nums focus:border-sky-600 focus:bg-white focus:ring-2 focus:ring-sky-200 focus:outline-none"
                         />
                       </td>
                       <td className="px-3 py-1.5 text-right font-semibold text-blue-700 tabular-nums">
@@ -488,35 +578,39 @@ export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-700">
+              <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-sky-900">
+                <Pencil className="h-3 w-3 text-sky-600" />
                 Tổng quỹ lương theo sản lượng khoán (đ)
               </label>
-              <input
-                type="number"
+              <FormattedNumberInput
                 value={period.directQuyKhoan}
-                onChange={(e) =>
+                decimals={0}
+                disabled={readOnly}
+                onChange={(v) =>
                   onUpdatePeriod((p) => ({
                     ...p,
-                    directQuyKhoan: Number(e.target.value) || 0,
+                    directQuyKhoan: v,
                   }))
                 }
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-right font-semibold tabular-nums focus:border-blue-500 focus:outline-none"
+                className="w-full rounded-lg border-2 border-sky-400 bg-sky-50/80 px-3 py-2 text-right font-bold text-slate-900 tabular-nums focus:border-sky-600 focus:bg-white focus:ring-2 focus:ring-sky-200 focus:outline-none"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-700">
+              <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-sky-900">
+                <Pencil className="h-3 w-3 text-sky-600" />
                 Tổng thưởng gộp 2 dây chuyền trước trừ khoán (đ)
               </label>
-              <input
-                type="number"
+              <FormattedNumberInput
                 value={period.directThuongGop}
-                onChange={(e) =>
+                decimals={0}
+                disabled={readOnly}
+                onChange={(v) =>
                   onUpdatePeriod((p) => ({
                     ...p,
-                    directThuongGop: Number(e.target.value) || 0,
+                    directThuongGop: v,
                   }))
                 }
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-right font-semibold tabular-nums focus:border-blue-500 focus:outline-none"
+                className="w-full rounded-lg border-2 border-sky-400 bg-sky-50/80 px-3 py-2 text-right font-bold text-slate-900 tabular-nums focus:border-sky-600 focus:bg-white focus:ring-2 focus:ring-sky-200 focus:outline-none"
               />
             </div>
           </div>
@@ -524,34 +618,39 @@ export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
 
         <div className="mt-4 grid gap-4 border-t border-slate-100 pt-4 sm:grid-cols-4">
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-700">
-              Lương bảo dưỡng DC2 (đ)
+            <label className="mb-1 flex items-center justify-between text-xs font-semibold text-sky-900">
+              <span className="inline-flex items-center gap-1">
+                <Pencil className="h-3 w-3 text-sky-600" />
+                Lương bảo dưỡng DC2 (đ)
+              </span>
+              <span className="text-[10px] font-normal text-sky-700">Nhập tháng</span>
             </label>
-            <input
-              type="number"
+            <FormattedNumberInput
               value={period.quyBD}
-              onChange={(e) =>
-                onUpdatePeriod((p) => ({ ...p, quyBD: Number(e.target.value) || 0 }))
-              }
-              className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-right text-sm font-semibold tabular-nums focus:border-blue-500 focus:outline-none"
+              decimals={0}
+              disabled={readOnly}
+              onChange={(v) => onUpdatePeriod((p) => ({ ...p, quyBD: v }))}
+              className="w-full rounded-lg border-2 border-sky-400 bg-sky-50/80 px-3 py-1.5 text-right text-sm font-bold text-slate-900 tabular-nums focus:border-sky-600 focus:bg-white focus:ring-2 focus:ring-sky-200 focus:outline-none"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-700">
-              Tỷ lệ chia thưởng trong tháng (%)
+            <label className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-700">
+              <span>Tỷ lệ chia thưởng trong tháng (%)</span>
+              <span className="text-[10px] font-normal text-slate-400">Cố định</span>
             </label>
-            <input
-              type="number"
+            <FormattedNumberInput
+              value={period.bonusSharePct}
+              decimals={1}
               min={0}
               max={100}
-              value={period.bonusSharePct}
-              onChange={(e) =>
+              disabled={readOnly}
+              onChange={(v) =>
                 onUpdatePeriod((p) => ({
                   ...p,
-                  bonusSharePct: Math.min(100, Math.max(0, Number(e.target.value) || 0)),
+                  bonusSharePct: Math.min(100, Math.max(0, v)),
                 }))
               }
-              className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-right text-sm font-semibold tabular-nums focus:border-blue-500 focus:outline-none"
+              className="w-full rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-right text-sm font-semibold text-slate-700 tabular-nums focus:border-blue-500 focus:bg-white focus:outline-none"
             />
           </div>
           <div className="rounded-lg bg-blue-50 px-3 py-2">
@@ -602,13 +701,13 @@ export const Tab1MonthlyHub: React.FC<Tab1Props> = ({
             className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm sm:col-span-4"
             required
           />
-          <input
-            type="number"
-            placeholder="Số tiền (đ)"
+          <FormattedNumberInput
             value={dedAmount}
-            onChange={(e) => setDedAmount(e.target.value)}
-            className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-right text-sm tabular-nums sm:col-span-2"
-            required
+            decimals={0}
+            placeholder="Số tiền (đ)"
+            disabled={readOnly}
+            onChange={(v) => setDedAmount(v)}
+            className="rounded-lg border-2 border-sky-400 bg-sky-50/70 px-2.5 py-1.5 text-right text-sm font-bold text-slate-900 tabular-nums focus:border-sky-600 focus:bg-white focus:outline-none sm:col-span-2"
           />
           <select
             value={dedScope}
