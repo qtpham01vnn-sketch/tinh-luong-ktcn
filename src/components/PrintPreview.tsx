@@ -80,6 +80,10 @@ export const PrintPreview: React.FC<Props> = ({ period, calc, sig }) => {
     ['P.TGĐ PHỤ TRÁCH', sig.deputyInCharge],
   ];
 
+  const totalVisible = vanPhongRows.length + dayChuyenRows.length;
+  const isSingleEmployee = totalVisible === 1;
+  const hasBothGroups = vanPhongRows.length > 0 && dayChuyenRows.length > 0;
+
   return (
     <div
       id="print-area"
@@ -104,7 +108,9 @@ export const PrintPreview: React.FC<Props> = ({ period, calc, sig }) => {
       <div className="mt-0.5 text-[9pt] italic">{COMPANY_ADDRESS}</div>
 
       <div className="mt-3 text-center">
-        <div className="text-[14pt] font-bold">BẢNG THANH TOÁN TIỀN LƯƠNG</div>
+        <div className="text-[14pt] font-bold">
+          {isSingleEmployee ? 'PHIẾU THANH TOÁN TIỀN LƯƠNG CÁ NHÂN' : 'BẢNG THANH TOÁN TIỀN LƯƠNG'}
+        </div>
         <div className="text-[13pt] font-bold">Phòng Kỹ thuật - Công nghệ {period.label.toLowerCase()}</div>
         <div className="text-[10.5pt] italic">({modeDescription(period)})</div>
       </div>
@@ -157,17 +163,34 @@ export const PrintPreview: React.FC<Props> = ({ period, calc, sig }) => {
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td className={`${td} font-bold italic`} colSpan={17}>I. BỘ PHẬN VĂN PHÒNG</td>
-          </tr>
-          {vanPhongRows.map(row)}
-          {sub('Cộng BP Văn phòng', subVanPhong, 'bg-slate-50')}
-          <tr>
-            <td className={`${td} font-bold italic`} colSpan={17}>II. BỘ PHẬN NHÂN VIÊN DÂY CHUYỀN 1 + 2</td>
-          </tr>
-          {dayChuyenRows.map(row)}
-          {sub('Cộng BP Nhân viên dây chuyền 1+2', subDayChuyen, 'bg-slate-50')}
-          {sub('TỔNG CỘNG TOÀN PHÒNG', g, 'bg-amber-50')}
+          {isSingleEmployee ? (
+            <>
+              {vanPhongRows.map(row)}
+              {dayChuyenRows.map(row)}
+            </>
+          ) : (
+            <>
+              {vanPhongRows.length > 0 && (
+                <>
+                  <tr>
+                    <td className={`${td} font-bold italic`} colSpan={17}>I. BỘ PHẬN VĂN PHÒNG</td>
+                  </tr>
+                  {vanPhongRows.map(row)}
+                  {hasBothGroups && sub('Cộng BP Văn phòng', subVanPhong, 'bg-slate-50')}
+                </>
+              )}
+              {dayChuyenRows.length > 0 && (
+                <>
+                  <tr>
+                    <td className={`${td} font-bold italic`} colSpan={17}>II. BỘ PHẬN NHÂN VIÊN DÂY CHUYỀN 1 + 2</td>
+                  </tr>
+                  {dayChuyenRows.map(row)}
+                  {hasBothGroups && sub('Cộng BP Nhân viên dây chuyền 1+2', subDayChuyen, 'bg-slate-50')}
+                </>
+              )}
+              {sub(hasBothGroups ? 'TỔNG CỘNG TOÀN PHÒNG' : 'TỔNG CỘNG BỘ PHẬN', g, 'bg-amber-50')}
+            </>
+          )}
         </tbody>
       </table>
 
@@ -176,19 +199,19 @@ export const PrintPreview: React.FC<Props> = ({ period, calc, sig }) => {
       </div>
 
       {/* Vùng ký duyệt */}
-      <div className="sign-block mt-3 grid grid-cols-4 text-center text-[12pt]">
+      <div className="sign-block mt-2 grid grid-cols-4 text-center text-[12pt]">
         {signers.map(([title, name]) => (
           <div key={title}>
             <div className="font-bold">{title}</div>
             <div className="text-[11pt] italic">(Ký, ghi rõ họ tên)</div>
-            <div className="h-20" />
+            <div className="h-14" />
             <div className="font-bold">{name}</div>
           </div>
         ))}
       </div>
 
       {/* Nơi nhận */}
-      <div className="mt-3 text-[11pt] leading-snug">
+      <div className="mt-2 text-[11pt] leading-snug">
         <div className="text-[12pt] font-bold italic">Nơi nhận:</div>
         <div>- P.TGĐ phụ trách;</div>
         <div>- P.TGĐ PT. TC-HC;</div>
